@@ -9,68 +9,11 @@ import numpy as np
 from scipy import signal as ss
 from scipy.io import wavfile
 
-from h5tools.core import h5tools as h5t
+from pipefinch.h5tools.core import h5tools as h5t
+from pipefinch.h5tools.kwik import kutil
+from pipefinch.h5tools.kwik import kwdfunctions as kwdf
 
-module_logger = logging.getLogger("h5tools.kwik.kwik")
-
-# gets the sampling frequency of a recording
-@h5t.h5_decorator
-def get_record_sampling_frequency(h5, recording=0):
-    path = 'recordings/{0:d}'.format(recording)
-    return h5[path].attrs.get('sample_rate')
-
-
-@h5t.h5_decorator
-def get_rec_attrs(h5, recording):
-    return h5['/recordings/{}'.format(int(recording))].attrs
-
-
-@h5t.h5_wrap
-def get_rec_start_sample(h5, recording):
-    return get_rec_attrs(h5, recording)['start_sample']
-
-
-@h5t.h5_wrap
-def get_rec_list(k_file):
-    """
-    :param k_file: (kwik or kwd)
-    :return: list of recordings in an h5file (kwik/kwd) as a sorted numpy array
-    """
-    return np.sort(list(map(int, k_file['/recordings'].keys())))
-
-
-@h5t.h5_wrap
-def rec_start_array(kwik):
-    rec_list = list(map(int, get_rec_list(kwik)))
-    rec_array = np.arange(max(rec_list) + 1)
-    start_array = np.zeros_like(rec_array)
-    for i_rec in rec_list:
-        start_array[i_rec] = get_rec_start_sample(kwik, i_rec)
-    return start_array
-
-
-@h5t.h5_wrap
-def get_corresponding_rec(kwik, stamps):
-    '''
-    Get the vector of recordings to which an array of absolute stamps belong
-    :param kwik: kwik_file (open in r mode), to get the rec starts
-    :param stamps: a list of stamps, absolute, refering to beginning of rec 0
-    :return: recs
-    '''
-    rec_list = get_rec_list(kwik)
-    rec_starts = rec_start_array(kwik)
-    stamps_recs = np.array([rec_list[np.where(rec_starts < start)[0][-1]] for start in stamps])
-    return stamps_recs
-
-
-def apply_rec_offset(h5, stamp_array, rec_array):
-    rec_offsets = rec_start_array(h5)
-    return apply_offsets(stamp_array, rec_array, rec_offsets)
-
-
-def apply_offsets(stamps, recs, offset_array):
-    offsets = list(map(lambda i: offset_array[i], recs))
-    return np.array(stamps) + np.array(offsets)
+module_logger = logging.getLogger("pipefinch.h5tools.kwik.kwik")
 
 
 # List all the units in a file
@@ -147,7 +90,7 @@ class KwikFile:
         # with open(file_names['par']) as f:
         #     exec (f.read())
         #     self.s_f = sample_rate
-        self.s_f = get_record_sampling_frequency(file_names['kwd'])
+        self.s_f = kutil.get_record_sampling_frequency(file_names['kwd'])
         self.create_kwf()
 
     def create_kwf(self):
@@ -157,7 +100,7 @@ class KwikFile:
 
     def make_spk_tables(self):
         with h5py.File(self.file_names['kwd'], 'r') as kwd:
-            rec_sizes = h5f.get_rec_sizes(kwd)
+            rec_sizes = kwdf.get_rec_sizes(kwd)
             self.rec_kwik, self.spk_kwik = ref_to_rec_starts(rec_sizes, self.spk)
 
         with h5py.File(self.file_names['kwk'], 'r+') as kwf:
@@ -173,7 +116,7 @@ class KwikFile:
 
     def make_rec_groups(self):
         rec_list = np.unique(self.rec_kwik)
-        rec_start_samples = h5f.get_rec_starts(self.file_names['kwd'])
+        rec_start_samples = kwdf.get_rec_starts(self.file_names['kwd'])
         #module_logger.debug(rec_start_samples)
         #module_logger.info("Found recs {}".format(rec_list))
         with h5py.File(self.file_names['kwk'], 'r+') as kwf:
@@ -224,11 +167,12 @@ class KwikFile:
 
 
 def make_shank_kwd(raw_file, out_file_path, chan_list):
-    ss_file = h5py.File(out_file_path, 'w')
-    copy_attribs(raw_file, ss_file)
-    ss_file.create_group('/recordings')
-    create_data_groups(raw_file, ss_file, chan_list)
-    ss_file.close()
+    raise NotImplementedError
+    # ss_file = h5py.File(out_file_path, 'w')
+    # h5t.copy_attribs(raw_file, ss_file)
+    # ss_file.create_group('/recordings')
+    # create_data_groups(raw_file, ss_file, chan_list)
+    # ss_file.close()
 
 
 def insert_table(group, table, name, attr_dict=None):
@@ -276,49 +220,52 @@ def ref_to_rec_starts(rec_sizes, spk_array):
 
 
 def kilo_to_kwik(bird, sess, file_names=None, location='ss', chan_group=0):
-    module_logger.info('Creating kwik file for bird: {} sess: {}'.format(bird, sess))
-    if file_names is None:
-        file_names = dict(
-            clu='spike_clusters.npy',
-            spk='spike_times.npy',
-            grp='cluster_groups.csv',
-            par='params.py',
-            temp='spike_templates.npy',
-            kwd='experiment.raw.kwd',
-            kwk='experiment.kwik')
+    raise NotImplementedError
+    # Todo: make it not depend on the experiment structure.
+    # these functions should all take paths and files as arguments.
+    # module_logger.info('Creating kwik file for bird: {} sess: {}'.format(bird, sess))
+    # if file_names is None:
+    #     file_names = dict(
+    #         clu='spike_clusters.npy',
+    #         spk='spike_times.npy',
+    #         grp='cluster_groups.csv',
+    #         par='params.py',
+    #         temp='spike_templates.npy',
+    #         kwd='experiment.raw.kwd',
+    #         kwk='experiment.kwik')
 
-    fn = et.file_names(bird, sess)
-    for key, value in file_names.items():
-        file_names[key] = os.path.join(fn['folders'][location], value)
+    # fn = et.file_names(bird, sess)
+    # for key, value in file_names.items():
+    #     file_names[key] = os.path.join(fn['folders'][location], value)
 
-    # Check whether there is manual sort or not:
-    if not os.path.isfile(file_names['clu']):
-        module_logger.info('Clu not found, will assume no manual sorting was done')
-        file_names['clu'] = None
-        file_names['grp'] = None
-        module_logger.debug(file_names)
-    else:
-        module_logger.info('Found clu file, will attempt to unpack manual sorted data from kilosort')
-        file_names['temp'] = None
-        module_logger.debug(file_names)
+    # # Check whether there is manual sort or not:
+    # if not os.path.isfile(file_names['clu']):
+    #     module_logger.info('Clu not found, will assume no manual sorting was done')
+    #     file_names['clu'] = None
+    #     file_names['grp'] = None
+    #     module_logger.debug(file_names)
+    # else:
+    #     module_logger.info('Found clu file, will attempt to unpack manual sorted data from kilosort')
+    #     file_names['temp'] = None
+    #     module_logger.debug(file_names)
 
-    k = KwikFile(file_names, chan_group=chan_group)
-    module_logger.info('Making spike tables')
-    k.make_spk_tables()
-    module_logger.info('Making rec tables (make_rec_groups)')
-    k.make_rec_groups()
-    module_logger.info('Making cluster group tables')
-    k.make_clu_groups()
+    # k = KwikFile(file_names, chan_group=chan_group)
+    # module_logger.info('Making spike tables')
+    # k.make_spk_tables()
+    # module_logger.info('Making rec tables (make_rec_groups)')
+    # k.make_rec_groups()
+    # module_logger.info('Making cluster group tables')
+    # k.make_clu_groups()
 
-    module_logger.info('Moving files to their sort folder')
-    sort_kilo_dir = os.path.join(fn['folders'][location],
-                                 'kilo_{:02d}'.format(chan_group))
-    os.makedirs(sort_kilo_dir, exist_ok=True)
-    py_files = glob.glob(os.path.join(fn['folders'][location], '*.py'))
-    npy_files = glob.glob(os.path.join(fn['folders'][location], '*.npy'))
-    for src in py_files + npy_files:
-        shutil.move(src, sort_kilo_dir)
-    module_logger.info('Removing temporary .dat file')
-    dat_file = os.path.join(fn['folders'][location], 'experiment.dat')
-    os.remove(dat_file)
-    module_logger.info('Done')
+    # module_logger.info('Moving files to their sort folder')
+    # sort_kilo_dir = os.path.join(fn['folders'][location],
+    #                              'kilo_{:02d}'.format(chan_group))
+    # os.makedirs(sort_kilo_dir, exist_ok=True)
+    # py_files = glob.glob(os.path.join(fn['folders'][location], '*.py'))
+    # npy_files = glob.glob(os.path.join(fn['folders'][location], '*.npy'))
+    # for src in py_files + npy_files:
+    #     shutil.move(src, sort_kilo_dir)
+    # module_logger.info('Removing temporary .dat file')
+    # dat_file = os.path.join(fn['folders'][location], 'experiment.dat')
+    # os.remove(dat_file)
+    # module_logger.info('Done')

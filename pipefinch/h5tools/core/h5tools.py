@@ -3,8 +3,7 @@ import logging
 import h5py
 import numpy as np
 
-logger = logging.getLogger('h5tools.core.h5tools')
-
+logger = logging.getLogger('pipefinch.h5tools.core.h5tools')
 
 def h5_decorator(default_mode='r'):
     """
@@ -21,8 +20,7 @@ def h5_decorator(default_mode='r'):
                 mode = kwargs['mode']
             else:
                 mode = default_mode
-            # logger.debug('leave open {}'.format(leave_open))
-            logger.debug('mode {}'.format(mode))
+                #logger.debug('mode {}'.format(mode))
             try:
                 if type(h5_file) is not h5py._hl.files.File:
                     with h5py.File(h5_file, mode) as h5_file:
@@ -31,12 +29,18 @@ def h5_decorator(default_mode='r'):
                     return_value = h5_function(h5_file, *args, **kwargs)
                 return return_value
             except UnboundLocalError as err:
-                last_err = err
                 logger.error(err)
+                raise
         return file_checker
     return wrap
 
 
+def h5_unicode_hack(x):
+    if isinstance(x, str):
+        x = x.encode('utf8')
+    elif isinstance(x, bytes):
+        x = x.decode('utf-8')
+    return x
 
 def list_subgroups(h5_group: h5py.Group) -> list:
     """
@@ -119,6 +123,10 @@ def obj_attrs_2_dict_translator(h5obj):
             logger.warning("Could not translate value for attribute {}".format(attr))
             dic[attr] = None
     return dic
+
+def copy_attribs(source, dest):
+    for key, attrib in source.attrs.items():
+        dest.attrs.create(key, attrib)
 
 
 def group_2_dict(parent_dic: dict, group: h5py.Group, key_name: str)->dict:
