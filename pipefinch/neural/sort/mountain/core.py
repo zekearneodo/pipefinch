@@ -8,6 +8,10 @@ from mountainlab_pytools import mlproc as mlp
 
 logger = logging.getLogger('pipefinch.sort.mountain.comre')
 
+# dispatch dictionary for run/add process to pipeline
+process_dispatch_dict = {'add': mlp.addProcess,
+                         'run': mlp.runProcess}
+
 
 def make_paths(ss_folder: str, out_subfolder_name: str='sort_out') -> dict:
     """
@@ -41,7 +45,9 @@ def make_paths(ss_folder: str, out_subfolder_name: str='sort_out') -> dict:
 
 
 def sort_dataset(*, file_paths: dict, freq_min: int=300, freq_max: int=6000,
-                 adjacency_radius: int=1, detect_threshold: float=3, opts: dict={}):
+                 adjacency_radius: int=1, detect_threshold: float=3,
+                 dispatch_method: str='run', opts: dict={}):
+
     dataset_dir = os.path.split(file_paths['mda'])[0]
     output_dir = os.path.split(file_paths['filt'])[0]
 
@@ -59,6 +65,7 @@ def sort_dataset(*, file_paths: dict, freq_min: int=300, freq_max: int=6000,
         samplerate=ds_params['samplerate'],
         freq_min=freq_min,
         freq_max=freq_max,
+        dispatch_method=dispatch_method,
         opts=opts
     )
 
@@ -67,6 +74,7 @@ def sort_dataset(*, file_paths: dict, freq_min: int=300, freq_max: int=6000,
     whiten(
         timeseries=file_paths['filt'],
         timeseries_out=file_paths['pre'],
+        dispatch_method=dispatch_method,
         opts=opts
     )
 
@@ -87,6 +95,7 @@ def sort_dataset(*, file_paths: dict, freq_min: int=300, freq_max: int=6000,
         adjacency_radius=adjacency_radius,
         detect_sign=detect_sign,
         detect_threshold=detect_threshold,
+        dispatch_method=dispatch_method,
         opts=opts
     )
 
@@ -97,6 +106,7 @@ def sort_dataset(*, file_paths: dict, freq_min: int=300, freq_max: int=6000,
         firings=file_paths['firings'],
         metrics_out=file_paths['cluster_metrics'],
         samplerate=ds_params['samplerate'],
+        dispatch_method=dispatch_method,
         opts=opts
     )
 
@@ -106,6 +116,7 @@ def sort_dataset(*, file_paths: dict, freq_min: int=300, freq_max: int=6000,
         firings=file_paths['firings'],
         cluster_metrics=file_paths['cluster_metrics'],
         firings_out=file_paths['firings_curated'],
+        dispatch_method=dispatch_method,
         opts=opts
     )
 
@@ -121,25 +132,30 @@ def read_dataset_params(dsdir: str) -> dict:
         return json.load(f)
 
 
-def bandpass_filter(*, timeseries, timeseries_out, samplerate, freq_min, freq_max, opts={}):
-    return mlp.runProcess('ephys.bandpass_filter',
-                          {'timeseries': timeseries},
-                          {'timeseries_out': timeseries_out},
-                          {'samplerate': samplerate,
-                              'freq_min': freq_min,
-                              'freq_max': freq_max},
-                          opts)
+def bandpass_filter(*, timeseries, timeseries_out, samplerate, freq_min, freq_max,
+                    dispatch_method='run',
+                    opts={}):
+    return process_dispatch_dict[dispatch_method]('ephys.bandpass_filter',
+                                                  {'timeseries': timeseries},
+                                                  {'timeseries_out': timeseries_out},
+                                                  {'samplerate': samplerate,
+                                                      'freq_min': freq_min,
+                                                      'freq_max': freq_max},
+                                                  opts)
 
 
-def whiten(*, timeseries, timeseries_out, opts={}):
-    return mlp.runProcess('ephys.whiten',
-                          {'timeseries': timeseries},
-                          {'timeseries_out': timeseries_out},
-                          {},
-                          opts)
+def whiten(*, timeseries, timeseries_out, dispatch_method='run', opts={}):
+    return process_dispatch_dict[dispatch_method]('ephys.whiten',
+                                                  {'timeseries': timeseries},
+                                                  {'timeseries_out': timeseries_out},
+                                                  {},
+                                                  opts)
 
 
-def ms4alg_sort(*, timeseries, geom, firings_out, detect_sign, adjacency_radius, detect_threshold=3, opts={}):
+def ms4alg_sort(*, timeseries, geom, firings_out, detect_sign, adjacency_radius,
+                detect_threshold=3,
+                dispatch_method='run',
+                opts={}):
     pp = {}
     pp['detect_sign'] = detect_sign
     pp['adjacency_radius'] = adjacency_radius
@@ -151,43 +167,88 @@ def ms4alg_sort(*, timeseries, geom, firings_out, detect_sign, adjacency_radius,
     else:
         warnings.warn('Will sort with no geometry input')
 
-    mlp.runProcess('ms4alg.sort',
-                   input_dict,
-                   {'firings_out': firings_out}, pp,
-                   opts)
+    process_dispatch_dict[dispatch_method]('ms4alg.sort',
+                                           input_dict,
+                                           {'firings_out': firings_out}, pp,
+                                           opts)
 
 
-def compute_cluster_metrics(*, timeseries, firings, metrics_out, samplerate, opts={}):
+def compute_cluster_metrics_run(*, timeseries, firings, metrics_out, samplerate,
+                            dispatch_method='run',
+                            opts={}):
 
-    metrics_clu = mlp.runProcess('ms3.cluster_metrics',
-                                 {'timeseries': timeseries, 'firings': firings},
-                                 {'cluster_metrics_out': True},
-                                 {'samplerate': samplerate},
-                                 opts)['cluster_metrics_out']
+    metrics_clu = process_dispatch_dict[dispatch_method]('ms3.cluster_metrics',
+                                                         {'timeseries': timeseries,
+                                                          'firings': firings},
+                                                         {'cluster_metrics_out': True},
+                                                         {'samplerate': samplerate},
+                                                         opts)['cluster_metrics_out']
 
-    metrics_iso = mlp.runProcess('ms3.isolation_metrics',
-                                 {'timeseries': timeseries, 'firings': firings},
-                                 {'metrics_out': True},
-                                 {'compute_bursting_parents': 'true'},
-                                 opts)['metrics_out']
+    metrics_iso = process_dispatch_dict[dispatch_method]('ms3.isolation_metrics',
+                                                         {'timeseries': timeseries,
+                                                          'firings': firings},
+                                                         {'metrics_out': True},
+                                                         {'compute_bursting_parents': 'true'},
+                                                         opts)['metrics_out']
 
-    return mlp.runProcess('ms3.combine_cluster_metrics',
-                          {'metrics_list': [metrics_clu, metrics_iso]},
-                          {'metrics_out': metrics_out},
-                          {},
-                          opts)
+    return process_dispatch_dict[dispatch_method]('ms3.combine_cluster_metrics',
+                                                  {'metrics_list': [
+                                                      metrics_clu, metrics_iso]},
+                                                  {'metrics_out': metrics_out},
+                                                  {},
+                                                  opts)
+
+def compute_cluster_metrics(*, timeseries, firings, metrics_out, samplerate,
+                            dispatch_method='run',
+                            opts={}):
+
+    clu_metrics = process_dispatch_dict[dispatch_method]('ms3.cluster_metrics',
+                                                         {'timeseries': timeseries,
+                                                          'firings': firings},
+                                                         {'cluster_metrics_out': True},
+                                                         {'samplerate': samplerate},
+                                                         opts)
+
+    iso_metrics = process_dispatch_dict[dispatch_method]('ms3.isolation_metrics',
+                                                         {'timeseries': timeseries,
+                                                          'firings': firings},
+                                                         {'metrics_out': True},
+                                                         {'compute_bursting_parents': 'true'},
+                                                         opts)                                                         
+    if dispatch_method=='run':
+        metrics_clu = clu_metrics['cluster_metrics_out']
+        metrics_iso = iso_metrics['metrics_out']
+    else:
+        metrics_clu = clu_metrics['outputs']['cluster_metrics_out']
+        metrics_iso = iso_metrics['outputs']['metrics_out']
+
+    return process_dispatch_dict[dispatch_method]('ms3.combine_cluster_metrics',
+                                                {'metrics_list': [
+                                                    metrics_clu, metrics_iso]},
+                                                {'metrics_out': metrics_out},
+                                                {},
+                                                opts)
 
 
-def automated_curation(*, firings, cluster_metrics, firings_out, opts={}):
+def automated_curation(*, firings, cluster_metrics, firings_out,
+                       dispatch_method='run',
+                       opts={}):
     # Automated curation
-    label_map = mlp.runProcess('ms4alg.create_label_map',
-                               {'metrics': cluster_metrics},
-                               {'label_map_out': True},
-                               {},
-                               opts)['label_map_out']
+    label_map_out = process_dispatch_dict[dispatch_method]('ms4alg.create_label_map',
+                                                       {'metrics': cluster_metrics},
+                                                       {'label_map_out': True},
+                                                       {},
+                                                       opts)
 
-    return mlp.runProcess('ms4alg.apply_label_map',
-                          {'label_map': label_map, 'firings': firings},
-                          {'firings_out': firings_out},
-                          {},
-                          opts)
+    if dispatch_method=='run':
+        label_map = label_map_out['label_map_out']
+    else:
+        label_map = label_map_out['outputs']['label_map_out']
+                                                 
+
+    return process_dispatch_dict[dispatch_method]('ms4alg.apply_label_map',
+                                                  {'label_map': label_map,
+                                                   'firings': firings},
+                                                  {'firings_out': firings_out},
+                                                  {},
+                                                  opts)
