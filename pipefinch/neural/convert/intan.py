@@ -11,11 +11,13 @@ import intan2kwik.kwd as ikwd
 
 logger = logging.getLogger('pipefinch.neural.convert')
 # Mountainsort header related dictionaries
+# functions for writing for the different data types
 mda_fun_dict = {'int16': mdaio.writemda16i,
                 'int32': mdaio.writemda32i,
                 'float16': mdaio.writemda,
                 'float32': mdaio.writemda32}
 
+# codes in the header for the different data types
 mda_dt_codes = {'float32': -3,
                'int16': -4,
                'int32': -5,
