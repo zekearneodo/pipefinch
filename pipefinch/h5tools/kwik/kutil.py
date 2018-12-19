@@ -13,7 +13,6 @@ from pipefinch.h5tools.core.h5tools import h5_decorator, h5_unicode_hack
 
 module_logger = logging.getLogger("pipefinch.h5tools.kwik.kutil")
 
-
 @h5_decorator(default_mode='r')
 def get_rec_list(k_file):
     """

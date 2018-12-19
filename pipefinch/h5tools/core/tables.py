@@ -131,13 +131,14 @@ def load_table_slice(table, row_list=None, col_list=None):
                       np.s_[np.min(row_list): np.max(row_list) + 1,
                             np.min(col_list): np.max(col_list) + 1])
     # return raw_table_slice
-    return_slice = raw_table_slice[row_list - np.min(row_list), :][:, col_list - np.min(col_list)]
+    return_slice = raw_table_slice[row_list -
+                                   np.min(row_list), :][:, col_list - np.min(col_list)]
     logger.debug('return table slice shape {}'.format(return_slice.shape))
     return return_slice
 
 
 # passing stuff to binary
-def dset_to_binary_file(data_set, out_file, chan_list=None, chunk_size=8000000):
+def dset_to_binary_file(data_set, out_file, chan_list=None, chunk_size=8000000, header='bin'):
     """
     :param data_set: a table from an h5 file to write to a binary. has to be daughter of a rec
     :param out_file: binary file - has to be open in 'wb' mode.
@@ -174,8 +175,14 @@ def dset_to_binary_file(data_set, out_file, chan_list=None, chunk_size=8000000):
         stored += (chunk_buffer[0: end - start, :]).size
         #logger.info('Chunk buffer dtype {}'.format(chunk_buffer.dtype))
         #logger.info('Chunk dtype dtype {}'.format(data_type))
-        out_file.write(
-            chunk_buffer[0: end - start].astype(data_type).tobytes())
+        if header is 'bin':
+            out_file.write(
+                chunk_buffer[0: end - start].astype(data_type).tobytes())
+        # for the .mda format it needs transposing (their order is nch, n_samples)
+        elif header is 'mda':
+            buf_write = chunk_buffer[0: end - start].astype(data_type)
+            out_file.write(
+                buf_write.reshape(buf_write.shape[1], buf_write.shape[0], order='C').tobytes(order='C'))
 
     # stored = (n_chunks -1) * chunk_buffer.size + \
     #     chunk_buffer[0: end - start, :].size
@@ -185,8 +192,8 @@ def dset_to_binary_file(data_set, out_file, chan_list=None, chunk_size=8000000):
 
 def merge_tables(source_file_path, dest_file_path, table_path, chunk_size=8000000):
     logger.debug('Appending table {0} from file {1} into file {2}'.format(table_path,
-                                                                           source_file_path,
-                                                                           dest_file_path))
+                                                                          source_file_path,
+                                                                          dest_file_path))
     with h5py.File(source_file_path, 'r') as source, h5py.File(dest_file_path, 'r+') as dest:
         append_table(source[table_path], dest[table_path],
                      chunk_size=chunk_size)
