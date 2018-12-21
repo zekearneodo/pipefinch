@@ -78,20 +78,6 @@ def dict_hdr(hdr_tuple):
     return hdr_dict
 
 
-def make_chan_info_dict(settings_dict: dict) -> dict:
-    ch_info_tuple = tuple()
-    for ch_id, ch_info_string in zip(settings_dict['channels'], settings_dict['channel info']):
-        ch_info_list = ch_info_string.split(',')
-        ch_info_dict = {'chan_id': ch_id,
-                        'name': ch_info_list[1].strip(),
-                        'save': ch_info_list[2].strip().split(' ')[1],
-                        'gain': float(ch_info_list[3].strip().split(' ')[1]),
-                        'rig': ch_info_list[0].strip()}
-        ch_info_tuple += (ch_info_dict, )
-    settings_dict['chan_info'] = ch_info_tuple
-    return settings_dict
-
-
 def read_file(file_path: str, style: str='chronic', file_format: int=1) -> tuple:
     data_type = set_data_type(file_format, style)
     elem_byte_size = struct.calcsize(data_type)

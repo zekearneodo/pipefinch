@@ -3,6 +3,8 @@ import logging
 import shutil
 import os
 import glob
+import datetime
+
 
 import h5py
 import numpy as np
@@ -13,6 +15,15 @@ from pipefinch.h5tools.core.h5tools import h5_decorator, h5_unicode_hack
 
 module_logger = logging.getLogger("pipefinch.h5tools.kwik.kutil")
 
+## Other util
+def parse_tstamp(t_string: str):
+    # t_string comes in 'yy-mm-dd hh:mm:ss'
+    # convert to timestamp
+    d, t = t_string.split(' ')
+    t_stamp = datetime.datetime(*tuple(map(int, d.split('-') + t.split(':'))))
+    return t_stamp
+
+# K file utils
 @h5_decorator(default_mode='r')
 def get_rec_list(k_file):
     """

@@ -6,7 +6,7 @@ from numpy.lib import recfunctions as rf
 from pipefinch.neural.convert.mdautil import update_mda_hdr, write_mda_hdr_explicit, mda_fun_dict
 from pipefinch.h5tools.core.h5tools import h5_decorator, list_subgroups, obj_attrs_2_dict_translator
 from pipefinch.h5tools.core.tables import dset_to_binary_file
-from pipefinch.h5tools.kwik.kutil import get_rec_list
+from pipefinch.h5tools.kwik.kutil import get_rec_list, parse_tstamp
 
 logger = logging.getLogger('pipefinch.h5tools.kwik.kwdfunctions')
 
@@ -80,6 +80,8 @@ def get_all_rec_meta(kwd_file) -> pd.DataFrame:
     # all_meta_pd.head()
     all_meta_pd['samples_count'] = list(get_rec_sizes(kwd_file).values())
     # todo: refine the dict
+    # timestaps from string to timestamp
+    all_meta_pd['start_time'] = all_meta_pd['start_time'].apply(parse_tstamp)
     return all_meta_pd
 
 
@@ -157,11 +159,12 @@ def kwd_to_binary(kwd_file, out_file_path, chan_list=None, rec_list=[], chunk_si
         if header is 'mda':
             logger.debug('mda header')
             template_data = get_data_set(kwd_file,
-                                            all_meta_pd.loc[rec_list[0], 'name'])  # get the first array to template the header
-            data_type = template_data.dtpye()
+                                         all_meta_pd.loc[rec_list[0], 'name'])  # get the first array to template the header
+            data_type = np.dtype(template_data.dtype)
 
-            mda_hdr = write_mda_hdr_explicit(len(chan_list), total_samples, data_type, out_file) 
-            
+            mda_hdr = write_mda_hdr_explicit(
+                len(chan_list), total_samples, data_type, out_file)
+
         for rec_name in rec_list:
             rec_elem = dset_to_binary_file(get_data_set(kwd_file, rec_name),
                                            out_file,

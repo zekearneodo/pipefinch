@@ -118,7 +118,7 @@ def obj_attrs_2_dict_translator(h5obj):
     for attr, value in h5obj.attrs.items():
         try:
             # logger.debug('attr {}'.format(attr))
-            dic[attr] = attr_2_dict_translator(value)
+            dic[attr] = attr_2_dict_translator(h5_unicode_hack(value))
         except ValueError:
             logger.warning("Could not translate value for attribute {}".format(attr))
             dic[attr] = None

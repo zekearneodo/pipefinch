@@ -9,7 +9,7 @@ from mountainlab_pytools import mlproc as mlp
 logger = logging.getLogger('pipefinch.sort.mountain.comre')
 
 # dispatch dictionary for run/add process to pipeline
-process_dispatch_dict = {'add': mlp.addProcess,
+process_dispatch_dict = {#'add': mlp.addProcess,
                          'run': mlp.runProcess}
 
 
