@@ -30,8 +30,8 @@ def make_paths(ss_folder: str, out_subfolder_name: str='sort_out') -> dict:
                      'params': 'params.json',
                      'geom': 'geom.csv'}
 
-    output_f_names = {'filt': 'filt.mda.prv',
-                      'pre': 'pre.mda.prv',
+    output_f_names = {'filt': 'filt.mda',
+                      'pre': 'pre.mda',
                       'firings': 'firings.mda',
                       'firings_curated': 'firings_curated.mda',
                       'cluster_metrics': 'cluster_metrics.json'
@@ -47,7 +47,32 @@ def make_paths(ss_folder: str, out_subfolder_name: str='sort_out') -> dict:
 def sort_dataset(*, file_paths: dict, freq_min: int=300, freq_max: int=6000,
                  adjacency_radius: int=1, detect_threshold: float=3,
                  dispatch_method: str='run', opts: dict={}):
+    """[summary]
 
+    Arguments:
+        file_paths {dict} -- [dictionary of paths of the .mda files:
+        'mda':
+        'params':
+        'geom':
+        'pre':
+        'firings':
+        'firings_curated':
+        'cluster_metrics":]
+
+    Keyword Arguments:
+        freq_min {int} -- [bandpass filter low] (default: {300})
+        freq_max {int} -- [bandpass filter hi] (default: {6000})
+        adjacency_radius {int} -- [adjacency ratio] (default: {1})
+        detect_threshold {float} -- [detection threshold for spikes (in rms)] (default: {3})
+        dispatch_method {str} -- [mode for the pipeline ('run' to run each step, 'add' to add to a pipeline)] (default: {'run'})
+        opts {dict} -- [optional mountainsort arguments] (default: {{}})
+
+    Raises:
+        Exception -- [description]
+
+    Returns:
+        [type] -- [description]
+    """
     dataset_dir = os.path.split(file_paths['mda'])[0]
     output_dir = os.path.split(file_paths['filt'])[0]
 

@@ -1,0 +1,6 @@
+namespaces:
+- doc: test_multicontainerinterface extensions
+  name: test_multicontainerinterface
+  schema:
+  - namespace: core
+  - source: test_multicontainerinterface.extensions.yaml
