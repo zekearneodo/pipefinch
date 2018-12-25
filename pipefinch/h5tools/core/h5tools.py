@@ -36,10 +36,16 @@ def h5_decorator(default_mode='r'):
 
 
 def h5_unicode_hack(x):
+    # encode strings in utf8, typically before write
     if isinstance(x, str):
         x = x.encode('utf8')
+    # decode strings from bytes
     elif isinstance(x, bytes):
         x = x.decode('utf-8')
+    # decode arrays of bytes (strings)
+    elif isinstance(x, np.ndarray):
+        if x.dtype.type is np.bytes_:
+            x = x.astype('U')
     return x
 
 def list_subgroups(h5_group: h5py.Group) -> list:

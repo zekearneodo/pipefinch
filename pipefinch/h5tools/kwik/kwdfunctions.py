@@ -1,4 +1,5 @@
 import logging
+import os
 import numpy as np
 import pandas as pd
 from numpy.lib import recfunctions as rf
@@ -7,6 +8,8 @@ from pipefinch.neural.convert.mdautil import update_mda_hdr, write_mda_hdr_expli
 from pipefinch.h5tools.core.h5tools import h5_decorator, list_subgroups, obj_attrs_2_dict_translator
 from pipefinch.h5tools.core.tables import dset_to_binary_file
 from pipefinch.h5tools.kwik.kutil import get_rec_list, parse_tstamp
+
+from tqdm import tqdm_notebook as tqdm
 
 logger = logging.getLogger('pipefinch.h5tools.kwik.kwdfunctions')
 
@@ -85,6 +88,25 @@ def get_all_rec_meta(kwd_file) -> pd.DataFrame:
     return all_meta_pd
 
 
+def get_all_chan_names(meta_pd: pd.DataFrame, chan_filt: np.ndarray = np.empty(0)) -> np.ndarray:
+    all_chans = np.unique(np.hstack(meta_pd.loc[:, 'channel_names'].values))
+
+    if chan_filt.size > 0:
+        found_stack = np.stack(
+            [np.char.find(all_chans, s) == 0 for s in chan_filt])
+        sel_chans = np.logical_or.reduce(found_stack)
+        all_chans = all_chans[sel_chans]
+
+    return all_chans
+
+
+def find_chan_names_idx(all_chans: np.ndarray, chan_list: np.ndarray) -> np.ndarray:
+    found_stack = np.stack(
+        [np.char.find(all_chans, s) == 0 for s in chan_list])
+    sel_chans = np.logical_or.reduce(found_stack)
+    return np.where(sel_chans)[0]
+
+
 def diff_array_columns(pd: pd.DataFrame, field: str, stride: int = 1) -> list:
     # return 'diff'  type comparison of a column containing a vector
     compared_list = [(x == y)
@@ -123,11 +145,13 @@ def check_continuity(meta_pd: dict, chan_idx_list=np.empty(0), rec_list=np.empty
 
 
 @h5_decorator(default_mode='r')
-def kwd_to_binary(kwd_file, out_file_path, chan_list=None, rec_list=[], chunk_size=8000000, header='bin'):
+def kwd_to_binary(kwd_file, out_file_path, chan_list: np.ndarray = np.empty(0),
+                  rec_list: np.ndarray = np.empty(0),
+                  chunk_size=8000000, header='bin'):
     """
     :param kwd_file: kwd file or kwd file
     :param out_file_path: path to the bin file that will be created
-    :param chan_list: list of channels (must be list or tuple). Default (None) will do the whole table
+    :param chan_list: list of channels. Default (empty) will do the whole table
     :param chunk_size: size in samples of the chunk
     :return:
     """
@@ -135,18 +159,17 @@ def kwd_to_binary(kwd_file, out_file_path, chan_list=None, rec_list=[], chunk_si
     # get the dataset of each recording and concatenateit to the out_file_path
     logger.info('Writing kwd_file {} to binary'.format(kwd_file.filename))
 
-    # select channels
-    if chan_list is not None:
-        if (type(chan_list) is not list) and (type(chan_list) is not tuple):
-            assert (type(chan_list) is int)
-            chan_list = [chan_list]
-        chan_list = list(chan_list)
-    logger.info('Channels to extract: {}'.format(chan_list))
-
     # select recordings
-    rec_list = get_rec_list(kwd_file) if rec_list == [] else rec_list
+    rec_list = get_rec_list(kwd_file) if rec_list.size == 0 else rec_list
     all_meta_pd = get_all_rec_meta(kwd_file)
     rec_slice = all_meta_pd['name'].isin(rec_list)
+
+    # select channels
+    if chan_list.size == 0:
+        logger.debug('Will extract all channels')
+        chan_list = get_all_chan_names(all_meta_pd)
+
+    logger.info('Channels to extract: {}'.format(chan_list))
 
     # check continuity of channels across the list of recordings for the selected channels
     #cont_check_ok, cont_pd = check_continuity(sess_meta_pd, chan_idx_list, rec_list=rec_list)
@@ -165,13 +188,25 @@ def kwd_to_binary(kwd_file, out_file_path, chan_list=None, rec_list=[], chunk_si
             mda_hdr = write_mda_hdr_explicit(
                 len(chan_list), total_samples, data_type, out_file)
 
-        for rec_name in rec_list:
+        pbar = tqdm((rec_list),
+                    total=rec_list.size,
+                    desc='{}'.format(os.path.split(out_file_path)[-1]),
+                    leave=True)
+        for rec_name in pbar:
+            pbar.set_postfix(rec=' {}'.format(rec_name))
+            rec_chans = all_meta_pd.loc[all_meta_pd['name']
+                                        == rec_name, 'channel_names'].values
+            assert rec_chans.size == 1, 'Either none or too many rec {} found'.format(
+                rec_name)
+            chan_numbers = find_chan_names_idx(rec_chans[0], chan_list)
+            logger.debug('Chann numbers {}'.format(chan_numbers.tolist()))
             rec_elem = dset_to_binary_file(get_data_set(kwd_file, rec_name),
                                            out_file,
-                                           chan_list=chan_list,
+                                           chan_list=chan_numbers.tolist(),
                                            chunk_size=chunk_size,
                                            header=header
                                            )
             elements_in += rec_elem
 
     logger.info('{} elements written'.format(elements_in))
+    return all_meta_pd.loc[rec_slice, :]
