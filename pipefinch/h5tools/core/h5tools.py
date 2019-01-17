@@ -36,6 +36,16 @@ def h5_decorator(default_mode='r'):
 
 
 def h5_unicode_hack(x):
+    """hack for reading/writing strings to/from h5files using h5py.
+    (i.e: catch the b'whatever' and read as strings)
+    
+    Arguments:
+        x {str, byte, np.ndarray} -- string, bytearray or nupmpy array of 
+        bytes representing strings
+    
+    Returns:
+        [type] -- [description]
+    """
     # encode strings in utf8, typically before write
     if isinstance(x, str):
         x = x.encode('utf8')
@@ -171,7 +181,6 @@ def group_2_dict(parent_dic: dict, group: h5py.Group, key_name: str)->dict:
                 # logger.info('Translated attrs of dataset {}'.format(subgroup_name))
             except:
                 raise
-
     return parent_dic
 
 

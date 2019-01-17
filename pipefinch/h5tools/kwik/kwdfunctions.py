@@ -1,5 +1,6 @@
 import logging
 import os
+import h5py
 import numpy as np
 import pandas as pd
 from numpy.lib import recfunctions as rf
@@ -14,7 +15,6 @@ from tqdm import tqdm_notebook as tqdm
 logger = logging.getLogger('pipefinch.h5tools.kwik.kwdfunctions')
 
 
-@h5_decorator(default_mode='r')
 def get_data_set(kwd_file, rec):
     """
     :param kwd_file:
@@ -22,7 +22,13 @@ def get_data_set(kwd_file, rec):
     :return: h5 dataset object with
     """
     #logger.debug('Getting dataset from rec {}'.format(rec))
-    return kwd_file['/recordings/{}/data'.format(int(rec))]
+    return kwd_file['/recordings/{}/data'.format(rec)]
+
+def get_data_chunk(kwd_file: h5py.File, rec: np.int, start: np.int, span: np.int,
+    chan_list: np.array) -> np.array:
+
+    dset = kwd_file['/recordings/{}/data'.format(rec)]
+    return dset[start: start + span, chan_list]
 
 
 @h5_decorator(default_mode='r')
@@ -65,7 +71,14 @@ def get_rec_starts(kwd_file):
 
 
 @h5_decorator(default_mode='r')
-def get_all_rec_meta(kwd_file) -> pd.DataFrame:
+def get_all_rec_meta(kwd_file: h5py.File) -> pd.DataFrame:
+    """[summary]
+    Arguments:
+        kwd_file {h5py.File} -- h5py file open in 'r' mode (kwd file)
+    
+    Returns:
+        pd.DataFrame -- pandas dataframe with metadata across all recs.
+    """
     # list all the recs in the file
     all_rec_list = get_rec_list(kwd_file)
     all_rec_meta_list = list(
@@ -87,10 +100,33 @@ def get_all_rec_meta(kwd_file) -> pd.DataFrame:
     all_meta_pd['start_time'] = all_meta_pd['start_time'].apply(parse_tstamp)
     return all_meta_pd
 
+def get_rec_range(pd_meta: pd.DataFrame, period_start: str, period_end:str) -> np.array:
+    if not pd_meta.index.name == 'start_time':
+        pd_meta.set_index('start_time', inplace=True)
+    rec_names_arr = pd_meta.between_time(period_start, period_end)['name'].values
+    pd_meta.reset_index(drop=False)
+    return rec_names_arr
+
+def get_sampling_rate(meta_pd: pd.DataFrame, rec_name) -> np.float:
+    return meta_pd.loc[meta_pd.name == rec_name, 'sample_rate'].values[0]
+
 
 def get_all_chan_names(meta_pd: pd.DataFrame, chan_filt: np.ndarray = np.empty(0)) -> np.ndarray:
-    all_chans = np.unique(np.hstack(meta_pd.loc[:, 'channel_names'].values))
+    """[summary]
 
+    Arguments:
+        meta_pd {pd.DataFrame} -- pandas dataframe with the metadata through the session
+
+    Keyword Arguments:
+        chan_filt {np.ndarray} -- list of search-strings to filter channels,
+        can be used to find particular channels, or channel groups 
+        (e.g np.array(['A-', ADC'] will pick ADC channels and ephys port A) 
+        (default: {np.empty(0)})
+
+    Returns:
+        np.ndarray -- Array with channel names present.
+    """
+    all_chans = np.unique(np.hstack(meta_pd.loc[:, 'channel_names'].values))
     if chan_filt.size > 0:
         found_stack = np.stack(
             [np.char.find(all_chans, s) == 0 for s in chan_filt])
@@ -101,6 +137,15 @@ def get_all_chan_names(meta_pd: pd.DataFrame, chan_filt: np.ndarray = np.empty(0
 
 
 def find_chan_names_idx(all_chans: np.ndarray, chan_list: np.ndarray) -> np.ndarray:
+    """ find the indices of an array of channel names
+    
+    Arguments:
+        all_chans {np.ndarray} -- array of strings with all channel names
+        chan_list {np.ndarray} -- array of strings with a selection of chan names
+    
+    Returns:
+        np.ndarray -- array of channel indices
+    """
     found_stack = np.stack(
         [np.char.find(all_chans, s) == 0 for s in chan_list])
     sel_chans = np.logical_or.reduce(found_stack)
@@ -149,7 +194,7 @@ def kwd_to_binary(kwd_file, out_file_path, chan_list: np.ndarray = np.empty(0),
                   rec_list: np.ndarray = np.empty(0),
                   chunk_size=8000000, header='bin'):
     """
-    :param kwd_file: kwd file or kwd file
+    :param kwd_file: kwd file or kwd file path
     :param out_file_path: path to the bin file that will be created
     :param chan_list: list of channels. Default (empty) will do the whole table
     :param chunk_size: size in samples of the chunk
