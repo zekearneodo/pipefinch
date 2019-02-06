@@ -17,7 +17,7 @@ module_logger = logging.getLogger("pipefinch.h5tools.kwik.kutil")
 
 ## Other util
 def parse_tstamp(t_string: str):
-    # t_string comes in 'yy-mm-dd hh:mm:ss'
+    # t_string comes in 'yyyy-mm-dd hh:mm:ss'
     # convert to timestamp
     d, t = t_string.split(' ')
     t_stamp = datetime.datetime(*tuple(map(int, d.split('-') + t.split(':'))))

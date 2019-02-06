@@ -3,6 +3,8 @@ import logging
 import shutil
 import os
 import glob
+import json
+import tqdm
 
 import h5py
 import numpy as np
@@ -12,6 +14,7 @@ from scipy.io import wavfile
 from pipefinch.h5tools.core import h5tools as h5t
 from pipefinch.h5tools.kwik import kutil
 from pipefinch.h5tools.kwik import kwdfunctions as kwdf
+from pipefinch.h5tools.kwik import mdaio
 
 module_logger = logging.getLogger("pipefinch.h5tools.kwik.kwik")
 
@@ -65,9 +68,159 @@ def dict2attrs(meta_dict, node):
         for key, val in meta_dict.items():
             node.attrs.create(key, val)
 
+### These should come from h5t, but need to see what's the deal with append_attributes.
+### Here it takes a list, in h5t it takes a dictionary!!!
+def insert_group(parent_group, name, attr_dict_list=None):
+    new_group = parent_group.create_group(name)
+    if attr_dict_list is not None:
+        append_atrributes(new_group, attr_dict_list)
+    return new_group
 
-class KwikFile:
+def append_atrributes(h5obj, attr_dict_list):
+    for attr_dict in attr_dict_list:
+        #print attr_dict['name'] + ' {0} - {1}'.format(attr_dict['data'], attr_dict['dtype'])
+        h5obj.attrs.create(attr_dict['name'], attr_dict['data'], dtype=attr_dict['dtype'])
+        #h5obj.attrs.create(attr['name'], attr['data'], dtype=attr['dtype'])
+
+class KwikFileWriter:
+    file_names = dict()
+    kwd_path = ''
+    kwik_path = ''
+    chan_group = 0
+    rec_sizes = np.empty(0)
+
+    spk = np.empty(0) # spikes tstamps (samples) 1d array
+    clu = np.empty(0) # clusters id matching spk, 1d array
+    grp = tuple() # tuple of (clu, sorted_descriptor)
+
     def __init__(self, file_names, chan_group=0):
+        self.file_names = file_names
+        self.chan_group = chan_group
+        self.kwd_path = file_names['kwd']
+        self.kwik_path = file_names['kwik']
+        self.rec_kwik = None
+        self.spk_kwik = None
+        self.kwf = None
+        self.chan_group = chan_group
+        # with open(file_names['par']) as f:
+        #     exec (f.read())
+        #     self.s_f = sample_rate
+        self.s_f = kutil.get_record_sampling_frequency(self.kwd_path)
+        self.create_kwf()
+
+
+    def create_kwf(self):
+        with h5py.File(self.file_names['kwik'], 'a') as kwf:
+            kwf.require_group('/channel_groups')
+            kwf.require_group('/recordings')
+
+    def get_clusters(self):
+        # needs doing in approrpiate class
+        # here be set:
+        # self.gru
+        # self.clu
+        # self.spk
+        raise NotImplementedError
+            
+    def make_spk_tables(self, realign_to_recordings=True):
+        # needs to have filled
+        # self.spk
+        # self.clu
+
+        with h5py.File(self.kwd_path, 'r') as kwd:
+            self.rec_sizes = kwdf.get_rec_sizes(kwd)
+        self.rec_kwik, self.spk_kwik = ref_to_rec_starts(self.rec_sizes, self.spk)
+        
+        with h5py.File(self.kwik_path, 'r+') as kwf:
+            chan_group = kwf['/channel_groups'].require_group('{}'.format(self.chan_group))
+            spikes_group = chan_group.require_group('spikes')
+            h5t.insert_table(spikes_group, self.rec_kwik.flatten(), 'recording')
+            if realign_to_recordings:
+                h5t.insert_table(spikes_group, self.spk_kwik.flatten() , 'time_samples')
+                h5t.insert_table(spikes_group, self.spk_kwik.flatten() /self.s_f, 'time_fractional')
+            else:
+                h5t.insert_table(spikes_group, self.spk.flatten() , 'time_samples')
+    
+            clusters_group = spikes_group.require_group('clusters')
+            h5t.insert_table(clusters_group, self.clu, 'main')
+            h5t.insert_table(clusters_group, self.clu, 'original')
+
+    def make_rec_groups(self):
+        rec_list = np.unique(self.rec_kwik)
+        rec_start_samples = kwdf.get_rec_starts(self.file_names['kwd'])
+        #module_logger.debug(rec_start_samples)
+        #module_logger.info("Found recs {}".format(rec_list))
+        with h5py.File(self.file_names['kwik'], 'r+') as kwf:
+            rec_group = kwf.require_group('recordings')
+            for rec in rec_list:
+                #module_logger.info("table for rec {}".format(rec))
+
+                rec_name = 'recording_{}'.format(rec)
+                #module_logger.debug(rec_start_samples)
+                #module_logger.info(rec_name)
+                attribs = [{'name': 'name', 'data': rec_name, 'dtype': 'S{}'.format(len(rec_name))},
+                           {'name': 'sample_rate', 'data': self.s_f, 'dtype': np.dtype(np.float64)},
+                           {'name': 'start_sample', 'data': rec_start_samples[rec], 'dtype': np.int64},
+                           {'name': 'start_time', 'data': rec_start_samples[rec] / self.s_f, 'dtype': np.float64}]
+                #module_logger.info('Will make rec group for rec {}'.format(rec))
+                try:
+                    insert_group(rec_group, str(rec), attribs)
+                # except ValueError as err:
+                #     if 'Name already exists' in err.args[0]:
+                #         module_logger.info('rec group already existed, skipping')
+                #     else:
+                #         raise
+                except RuntimeError as err:
+                    if 'Name already exists' in err.args[0]:
+                        module_logger.info('rec group already existed, skipping')
+                    else:
+                        raise
+
+    def make_clu_groups(self, name='main'):
+        clu_grp_dict = {'good': 2,
+                           'mua': 1,
+                           'noise': 0,
+                           'unsorted': 3}
+        
+        with open(self.file_names['cluster_metrics'], 'r') as f:
+            metrics = json.load(f)['clusters']
+            # loads a list of dictionaries with keys ['label', 'metrics']
+
+        with h5py.File(self.file_names['kwik'], 'r+') as kwf:
+            chan_group = kwf['/channel_groups'].require_group('{}'.format(self.chan_group))
+            clusters_group = chan_group.require_group('clusters')
+            desc_group = clusters_group.require_group(name)
+            
+            for metric in metrics:
+                clu_type = [x[1] for x in self.grp if x[0] == metric['label']]
+
+                attribs = [{'name': 'cluster_group', 
+                            'data': clu_grp_dict[clu_type[0]], 
+                            'dtype': np.int64}]
+                
+                this_cluster_group = insert_group(desc_group, str(metric['label']), attribs)
+                h5t.append_atrributes(this_cluster_group, metric['metrics'])
+        
+class MdaKwikWriter(KwikFileWriter):
+    mda_params = dict()
+    # init the KwikFile class
+    def __init__(self, file_names, chan_group=0):
+        super(MdaKwikWriter, self).__init__(file_names, chan_group=chan_group)
+    
+    def get_clusters(self):
+        spk_data = mdaio.readmda(self.file_names['firings'])
+        self.spk = spk_data[1, :].astype(np.int64)
+        self.clu = spk_data[2, :].astype(np.int)
+        self.grp = [(i, 'unsorted') for i in np.unique(self.clu)]
+
+        # TODO: include cluster metrics (.json file)
+
+
+
+class KiloKwikFile(KwikFile):
+    # init the KwikFile class
+    def __init__(self, file_names, chan_group=0):
+        super(KiloKwikFile, self).__init__(ch, h5_file=kwd_file)
         self.file_names = file_names
         if file_names['clu']:
             self.clu = np.squeeze(np.load(file_names['clu']))
@@ -93,11 +246,6 @@ class KwikFile:
         self.s_f = kutil.get_record_sampling_frequency(file_names['kwd'])
         self.create_kwf()
 
-    def create_kwf(self):
-        with h5py.File(self.file_names['kwk'], 'a') as kwf:
-            kwf.require_group('/channel_groups')
-            kwf.require_group('/recordings')
-
     def make_spk_tables(self):
         with h5py.File(self.file_names['kwd'], 'r') as kwd:
             rec_sizes = kwdf.get_rec_sizes(kwd)
@@ -106,64 +254,14 @@ class KwikFile:
         with h5py.File(self.file_names['kwk'], 'r+') as kwf:
             chan_group = kwf['/channel_groups'].require_group('{}'.format(self.chan_group))
             spikes_group = chan_group.require_group('spikes')
-            insert_table(spikes_group, self.rec_kwik.flatten(), 'recording')
-            insert_table(spikes_group, self.spk_kwik.flatten(), 'time_samples')
-            insert_table(spikes_group, self.spk_kwik.flatten() / self.s_f, 'time_fractional')
+            h5t.insert_table(spikes_group, self.rec_kwik.flatten(), 'recording')
+            h5t.insert_table(spikes_group, self.spk_kwik.flatten(), 'time_samples')
+            h5t.insert_table(spikes_group, self.spk_kwik.flatten() / self.s_f, 'time_fractional')
 
             clusters_group = spikes_group.require_group('clusters')
-            insert_table(clusters_group, self.clu, 'main')
-            insert_table(clusters_group, self.clu, 'original')
+            h5t.insert_table(clusters_group, self.clu, 'main')
+            h5t.insert_table(clusters_group, self.clu, 'original')
 
-    def make_rec_groups(self):
-        rec_list = np.unique(self.rec_kwik)
-        rec_start_samples = kwdf.get_rec_starts(self.file_names['kwd'])
-        #module_logger.debug(rec_start_samples)
-        #module_logger.info("Found recs {}".format(rec_list))
-        with h5py.File(self.file_names['kwk'], 'r+') as kwf:
-            rec_group = kwf.require_group('recordings')
-            for rec in rec_list:
-                #module_logger.info("table for rec {}".format(rec))
-
-                rec_name = 'recording_{}'.format(rec)
-                #module_logger.debug(rec_start_samples)
-                #module_logger.info(rec_name)
-                attribs = [{'name': 'name', 'data': rec_name, 'dtype': 'S{}'.format(len(rec_name))},
-                           {'name': 'sample_rate', 'data': self.s_f, 'dtype': np.dtype(np.float64)},
-                           {'name': 'start_sample', 'data': rec_start_samples[rec], 'dtype': np.int64},
-                           {'name': 'start_time', 'data': rec_start_samples[rec] / self.s_f, 'dtype': np.float64}]
-                module_logger.info('Will make rec group for rec {}'.format(rec))
-                try:
-                    insert_group(rec_group, str(rec), attribs)
-                # except ValueError as err:
-                #     if 'Name already exists' in err.args[0]:
-                #         module_logger.info('rec group already existed, skipping')
-                #     else:
-                #         raise
-                except RuntimeError as err:
-                    if 'Name already exists' in err.args[0]:
-                        module_logger.info('rec group already existed, skipping')
-                    else:
-                        raise
-
-
-
-    def make_clu_groups(self, name='main'):
-        clu_grp_dict = {'good': 2,
-                        'mua': 1,
-                        'noise': 0,
-                        'unsorted': 3}
-
-        with h5py.File(self.file_names['kwk'], 'r+') as kwf:
-            chan_group = kwf['/channel_groups'].require_group('{}'.format(self.chan_group))
-            clusters_group = chan_group.require_group('clusters')
-            desc_group = clusters_group.require_group(name)
-
-            for clu in self.grp:
-                attribs = [{'name': 'cluster_group',
-                            'data': clu_grp_dict[clu[1]],
-                            'dtype': np.int64}]
-
-                insert_group(desc_group, str(clu[0]), attribs)
 
 
 def make_shank_kwd(raw_file, out_file_path, chan_list):
@@ -173,24 +271,6 @@ def make_shank_kwd(raw_file, out_file_path, chan_list):
     # ss_file.create_group('/recordings')
     # create_data_groups(raw_file, ss_file, chan_list)
     # ss_file.close()
-
-
-def insert_table(group, table, name, attr_dict=None):
-    return group.create_dataset(name, data=table)
-
-
-def insert_group(parent_group, name, attr_dict_list=None):
-    new_group = parent_group.require_group(name)
-    if attr_dict_list is not None:
-        append_atrributes(new_group, attr_dict_list)
-    return new_group
-
-
-def append_atrributes(h5obj, attr_dict_list):
-    for attr_dict in attr_dict_list:
-        # print attr_dict['name'] + ' {0} - {1}'.format(attr_dict['data'], attr_dict['dtype'])
-        h5obj.attrs.create(attr_dict['name'], attr_dict['data'], dtype=attr_dict['dtype'])
-        # h5obj.attrs.create(attr['name'], attr['data'], dtype=attr['dtype'])
 
 
 def load_grp_file(grp_file_path):
@@ -218,6 +298,19 @@ def ref_to_rec_starts(rec_sizes, spk_array):
 
     return rec_array, spk_rec
 
+
+def mda_to_kwik(kwd_path, kwik_path, mda_firings_path, metrics_path, realign_to_recordings=True):
+    file_names = {'kwd': kwd_path,
+    'kwik': kwik_path,
+    'firings': mda_firings_path,
+    'cluster_metrics': metrics_path}
+
+    kwik_file_writer = MdaKwikWriter(file_names)
+    kwik_file_writer.get_clusters()
+    kwik_file_writer.make_spk_tables(realign_to_recordings=True)
+    kwik_file_writer.make_rec_groups()
+    kwik_file_writer.make_clu_groups()
+    return kwik_file_writer
 
 def kilo_to_kwik(bird, sess, file_names=None, location='ss', chan_group=0):
     raise NotImplementedError

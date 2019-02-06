@@ -3,6 +3,10 @@ import os
 import h5py
 import numpy as np
 import pandas as pd
+import tempfile
+import shutil
+import contextlib
+
 from numpy.lib import recfunctions as rf
 
 from pipefinch.neural.convert.mdautil import update_mda_hdr, write_mda_hdr_explicit, mda_fun_dict
@@ -10,6 +14,8 @@ from pipefinch.h5tools.core.h5tools import h5_decorator, list_subgroups, obj_att
 from pipefinch.h5tools.core.tables import dset_to_binary_file
 from pipefinch.h5tools.kwik.kutil import get_rec_list, parse_tstamp
 
+from intan2kwik.core.file import util as fu
+from intan2kwik.kwd import which_board, intan_to_kwd_multirec
 from tqdm import tqdm_notebook as tqdm
 
 logger = logging.getLogger('pipefinch.h5tools.kwik.kwdfunctions')
@@ -24,11 +30,60 @@ def get_data_set(kwd_file, rec):
     #logger.debug('Getting dataset from rec {}'.format(rec))
     return kwd_file['/recordings/{}/data'.format(rec)]
 
-def get_data_chunk(kwd_file: h5py.File, rec: np.int, start: np.int, span: np.int,
-    chan_list: np.array) -> np.array:
 
-    dset = kwd_file['/recordings/{}/data'.format(rec)]
-    return dset[start: start + span, chan_list]
+def get_data_chunk(kwd_file: h5py.File, rec: np.int, start: np.int, span: np.int,
+                   chan_list: np.array, table_name: str='data') -> np.array:
+    """get a chunk of a dataset from a particular rec in a kwd/kwik file.
+
+    Arguments:
+        kwd_file {h5py.File} -- h5py.File object (open in 'r' mode at least)
+        rec {np.int} -- id of recording group
+        start {np.int} -- start (samples) within the rec group
+        span {np.int} -- number of samples to read from start positions
+        chan_list {np.array} -- list of channel indices from the table to read
+
+    Keyword Arguments:
+        table_name {str} -- name of the table (e.g. 'data', 'dig_in', ...) (default: {'data'})
+
+    Returns:
+        np.array -- array with the chunk of data (n_samples x n_col)
+    """
+    dset = kwd_file['/recordings/{}/{}'.format(rec, table_name)]
+    place_holder = np.zeros([span, chan_list.size])
+    place_holder[:] = np.nan
+
+    block_read = dset[start: start + span, chan_list]
+    #logger.info('read block shape {}'.format(block_read.shape))
+
+    if start < 0:
+        shift = start * (-1)
+        start = 0
+        span = span - shift
+        logger.info('negative start, there will be nans')
+    else:
+        shift = 0
+
+    span = block_read.shape[0]
+    #logger.info('span {}'.format(place_holder[shift: span, :].shape))
+    place_holder[shift: span, :] = block_read
+    return place_holder
+
+
+def get_digital_chunk(kwd_file: h5py.File, rec: np.int, start: np.int, span: np.int,
+                      chan_list: np.array) -> np.array:
+    """get a chunk of a dataset from a particular rec in a kwd/kwik file.
+
+    Arguments:
+        kwd_file {h5py.File} -- h5py.File object (open in 'r' mode at least)
+        rec {np.int} -- id of recording group
+        start {np.int} -- start (samples) within the rec group
+        span {np.int} -- number of samples to read from start positions
+        chan_list {np.array} -- list of channel indices from the table to read
+
+    Returns:
+        np.array -- array with the chunk of data (n_samples x n_col)
+    """
+    return get_data_chunk(kwd_file, rec, start, span, chan_list, table_name='dig_in')
 
 
 @h5_decorator(default_mode='r')
@@ -75,7 +130,7 @@ def get_all_rec_meta(kwd_file: h5py.File) -> pd.DataFrame:
     """[summary]
     Arguments:
         kwd_file {h5py.File} -- h5py file open in 'r' mode (kwd file)
-    
+
     Returns:
         pd.DataFrame -- pandas dataframe with metadata across all recs.
     """
@@ -100,18 +155,22 @@ def get_all_rec_meta(kwd_file: h5py.File) -> pd.DataFrame:
     all_meta_pd['start_time'] = all_meta_pd['start_time'].apply(parse_tstamp)
     return all_meta_pd
 
-def get_rec_range(pd_meta: pd.DataFrame, period_start: str, period_end:str) -> np.array:
+
+def get_rec_range(pd_meta: pd.DataFrame, period_start: str, period_end: str) -> np.array:
     if not pd_meta.index.name == 'start_time':
         pd_meta.set_index('start_time', inplace=True)
-    rec_names_arr = pd_meta.between_time(period_start, period_end)['name'].values
+    rec_names_arr = pd_meta.between_time(
+        period_start, period_end)['name'].values
     pd_meta.reset_index(drop=False)
     return rec_names_arr
+
 
 def get_sampling_rate(meta_pd: pd.DataFrame, rec_name) -> np.float:
     return meta_pd.loc[meta_pd.name == rec_name, 'sample_rate'].values[0]
 
 
-def get_all_chan_names(meta_pd: pd.DataFrame, chan_filt: np.ndarray = np.empty(0)) -> np.ndarray:
+def get_all_chan_names(meta_pd: pd.DataFrame, chan_filt: np.ndarray = np.empty(0),
+                       block: str ='analog') -> np.ndarray:
     """[summary]
 
     Arguments:
@@ -122,11 +181,18 @@ def get_all_chan_names(meta_pd: pd.DataFrame, chan_filt: np.ndarray = np.empty(0
         can be used to find particular channels, or channel groups 
         (e.g np.array(['A-', ADC'] will pick ADC channels and ephys port A) 
         (default: {np.empty(0)})
+        block {str} -- channel block ('analog', 'digital', 'aux') (default: {'analog'})
+        (note, 'analog' is for ports A-D and ADC; 'digital' for 'DIN'/'DOUT', 'aux' not implemented)
 
     Returns:
         np.ndarray -- Array with channel names present.
+        Warning: channels are sorted. Do not use this output as a reference for the order of the channels.
     """
-    all_chans = np.unique(np.hstack(meta_pd.loc[:, 'channel_names'].values))
+    block_to_names = {'analog': 'channel_names',
+                      'digital': 'dig_channel_names'}
+
+    all_chans = np.unique(
+        np.hstack(meta_pd.loc[:, block_to_names[block]].values))
     if chan_filt.size > 0:
         found_stack = np.stack(
             [np.char.find(all_chans, s) == 0 for s in chan_filt])
@@ -138,16 +204,31 @@ def get_all_chan_names(meta_pd: pd.DataFrame, chan_filt: np.ndarray = np.empty(0
 
 def find_chan_names_idx(all_chans: np.ndarray, chan_list: np.ndarray) -> np.ndarray:
     """ find the indices of an array of channel names
-    
+
     Arguments:
         all_chans {np.ndarray} -- array of strings with all channel names
         chan_list {np.ndarray} -- array of strings with a selection of chan names
-    
+
     Returns:
         np.ndarray -- array of channel indices
     """
     found_stack = np.stack(
         [np.char.find(all_chans, s) == 0 for s in chan_list])
+    sel_chans = np.logical_or.reduce(found_stack)
+    return np.where(sel_chans)[0]
+
+
+def rec_chan_idx(meta_pd: pd.DataFrame, rec: int, chan_name_list: np.ndarray,
+                 block: str='analog') -> np.ndarray:
+    if block == 'analog':
+        chan_name_filed = 'channel_names'
+    elif block == 'digital':
+        chan_name_filed = 'dig_channel_names'
+
+    rec_all_chans = meta_pd.loc[meta_pd['name'] == 0,
+                                chan_name_filed].values[0]
+    found_stack = np.stack(
+        [np.char.find(rec_all_chans, s) == 0 for s in chan_name_list])
     sel_chans = np.logical_or.reduce(found_stack)
     return np.where(sel_chans)[0]
 
@@ -255,3 +336,54 @@ def kwd_to_binary(kwd_file, out_file_path, chan_list: np.ndarray = np.empty(0),
 
     logger.info('{} elements written'.format(elements_in))
     return all_meta_pd.loc[rec_slice, :]
+
+
+def kwd_append_recs(kwd_source: h5py.File, kwd_dest: h5py.File, rec_list: np.ndarray=np.empty(0)):
+    # super basic, just copy groups
+    if rec_list.size == 0:
+        rec_list = get_rec_list(kwd_source)
+
+    for rec in rec_list:
+        kwd_source.copy('/recordings/{}'.format(rec), kwd_dest['/recordings'])
+
+
+def update_kwd(kwd_path, rhx_path):
+    # the whole metadata of the folder
+    # get the contents of the folder, intan2kwik style
+    logger.info('updating kwd file {} from folder {}'.format(
+        kwd_path, rhx_path))
+    board = which_board(rhx_path)
+    rhx_meta = fu.get_rhd_pd(rhx_path, file_extension=board)
+
+    # the metadata of the existing file and look for the last timestamp present
+    current_meta_pd = get_all_rec_meta(kwd_path)
+    last_timestamp_in = current_meta_pd.sort_values('start_time').iloc[-1]['start_time']
+
+    # get the first timestamp after that wihch is a beginning of a rec
+    rhx_meta = fu.get_rhd_pd(rhx_path, file_extension=board)
+    new_tstamp_pd = rhx_meta.sort_values('t_stamp').loc[(rhx_meta['rec_break']) &
+                                                              (rhx_meta['t_stamp'] > last_timestamp_in)]
+    if new_tstamp_pd.empty:
+        logger.info('No new files to add to the file')
+        return None, new_tstamp_pd, rhx_meta
+
+    first_new_timestamp = new_tstamp_pd.iloc[0]['t_stamp']
+    new_rhx_pd = rhx_meta.loc[rhx_meta['t_stamp'] >= first_new_timestamp, :]
+    
+    logger.info('Will add {} new files'.format(new_rhx_pd.index.size))
+    #return new_rhx_pd
+    # go through a temporary file
+    tmp_sess_dir = tempfile.mkdtemp()
+    kwd_temp_path = os.path.join(tmp_sess_dir, os.path.split(kwd_path)[-1])
+    logger.debug('tmp path {}'.format(kwd_temp_path))
+    try:
+        with h5py.File(kwd_temp_path, 'a') as kwd_temp_file, h5py.File(kwd_path, 'r+') as kwd_file:
+            first_header = intan_to_kwd_multirec(kwd_temp_file, new_rhx_pd)
+
+            logger.info('merging back to {}'.format(kwd_path))
+            kwd_append_recs(kwd_temp_file, kwd_file)
+    finally:
+        logger.info('removing temp file')
+        with contextlib.suppress(FileNotFoundError):
+            shutil.rmtree(tmp_sess_dir)
+    return first_header, new_rhx_pd, rhx_meta
