@@ -34,17 +34,17 @@ def get_file_structure(location: dict, sess_par: dict, struct_par: dict=default_
    # The raw files
     exp_struct['folders']['raw'] = os.path.join(location['mnt'], bird, 'ephys', 'raw', sess)
     for f, n in zip(['par', 'set'], ['experiment.json', 'settings.isf']):
-        exp_struct['files'][f] = os.path.join(exp_struct['folders']['raw'])
+        exp_struct['files'][f] = os.path.join(exp_struct['folders']['raw'], n)
 
     # the kwik system (spikes, events, kwd file with streams)
     exp_struct['folders']['kwik'] = os.path.join(location['local'], bird, 'ephys', 'kwik', sess)
     for f, n in zip(['kwd', 'kwe', 'kwe'], ['streams.kwd', 'spikes.kwik', 'events.kwe']):
-        exp_struct['files'][f] = os.path.join(exp_struct['folders']['kwik'])
+        exp_struct['files'][f] = os.path.join(exp_struct['folders']['kwik'], n)
     
     # the aux, temporary mountainsort files. these will be deleted after sorting
     exp_struct['folders']['msort'] = os.path.join(location['local'], bird, 'ephys', 'msort', sess)
     for f, n in zip(['mda_raw', 'par'], ['raw.mda', 'params.json']):
-        exp_struct['files'][f] = os.path.join(exp_struct['folders']['msort'])
+        exp_struct['files'][f] = os.path.join(exp_struct['folders']['msort'], n)
 
     return exp_struct
     
