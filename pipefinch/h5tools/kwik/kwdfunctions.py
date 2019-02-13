@@ -124,6 +124,22 @@ def get_rec_starts(kwd_file):
                   rec in zip(starts_vec, rec_sizes.keys())}
     return rec_starts
 
+@h5_decorator(default_mode='r')
+def get_frames(kwd_file, starts: np.ndarray, recs: np.ndarray, span: int, chan_list: np.ndarray):
+    
+    all_rec = np.unique(recs)
+
+    all_rec_frames = []
+    for r in all_rec:
+        starts_rec = starts[recs == r]
+        starts_rec.sort()
+        frames = list(map(lambda x: get_data_chunk(kwd_file, r, x, span, chan_list), 
+        starts_rec))
+        all_rec_frames.append(np.stack(frames, axis=0))
+
+    all_frames_array = np.concatenate(all_rec_frames, axis=0)
+    return all_frames_array
+
 
 @h5_decorator(default_mode='r')
 def get_all_rec_meta(kwd_file: h5py.File) -> pd.DataFrame:

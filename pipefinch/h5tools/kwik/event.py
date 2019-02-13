@@ -26,19 +26,19 @@ class Event:
     kwik_meta_pd = None
     ch_names = None
 
-    def __init__(self, name, h5_file=None):
+    def __init__(self, name, h5_path=None):
         self.name = name
-        self.h5_file = h5_file
+        self.h5_path = h5_path
 
 
 class TTL(Event):
-    def __init__(self, name: str, ch_name: str, h5_file: h5py.File):
-        Event.__init__(self, name, h5_file=h5_file)
+    def __init__(self, name: str, ch_name: str, h5_path: str):
+        Event.__init__(self, name, h5_path=h5_path)
 
         # the names of the datasets whithin each rec where the relevant data is
 
         # get the file metadata
-        kwik_meta_pd = kwdf.get_all_rec_meta(h5_file)
+        kwik_meta_pd = kwdf.get_all_rec_meta(h5_path)
 
         # lookup the digital channel within the table of dig channels
         all_dig_ch = kwdf.get_all_chan_names(kwik_meta_pd,
@@ -63,15 +63,16 @@ class TTL(Event):
     # fill a pandas dataframe with all the events
     def fill_event_pd(self):
         all_rec = self.kwik_meta_pd['name'].values
-        for rec in all_rec:
-            r_group = self.h5_file['/recordings/{}'.format(rec)]
-            # the datasets
-            ev_arr = np.hstack([r_group['{}'.format(x)]
-                                for x in self.rec_datasets.values()])
-            rec_pd = pd.DataFrame(ev_arr, columns=self.rec_datasets.keys(),
-            dtype=np.int)
-            rec_pd['rec'] = rec
-            self.event_pd = self.event_pd.append(rec_pd, sort=False)
+        with h5py.File(self.h5_path, 'r') as h5_file:
+            for rec in all_rec:
+                r_group = h5_file['/recordings/{}'.format(rec)]
+                # the datasets
+                ev_arr = np.hstack([r_group['{}'.format(x)]
+                                    for x in self.rec_datasets.values()])
+                rec_pd = pd.DataFrame(ev_arr, columns=self.rec_datasets.keys(),
+                dtype=np.int)
+                rec_pd['rec'] = rec
+                self.event_pd = self.event_pd.append(rec_pd, sort=False)
         self.event_pd['ch'] = self.event_pd['ch_idx'].apply(lambda x: self.ch_names[x])
         return self.event_pd
         
