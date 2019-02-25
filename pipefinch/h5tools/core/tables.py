@@ -149,7 +149,7 @@ def dset_to_binary_file(data_set, out_file, chan_list=None, chunk_size=8000000, 
     samples_data = data_set.shape[0]
     channels_data = data_set.shape[1]
     data_type = np.dtype(data_set.dtype)
-    logger.info('Ripping dataset from {}'.format(data_set.parent.name))
+    logger.debug('Ripping dataset from {}'.format(data_set.parent.name))
     if chan_list is None:
         logger.debug('Counting channels')
         chan_list = range(channels_data)

@@ -1,0 +1,21 @@
+{
+    "chan": {
+        "ttl": {
+            "trig_perceptron": "DIN-01",
+            "trig_recording": "DIN-00"
+        },
+        "adc": {
+            "microphone_0": "ADC-00"
+        },
+        "port": {
+            "probe_0": "A-"
+        }
+    },
+    "probe": {
+        "probe_0": {
+            "model": "a1x32-edge-5mm-20-177_H32",
+            "serial": "768b",
+            "headstage": "intan32-h32"
+        }
+    }
+}

@@ -7,7 +7,9 @@ import tempfile
 import shutil
 import contextlib
 
+
 from numpy.lib import recfunctions as rf
+from numba import jit
 
 from pipefinch.neural.convert.mdautil import update_mda_hdr, write_mda_hdr_explicit, mda_fun_dict
 from pipefinch.h5tools.core.h5tools import h5_decorator, list_subgroups, obj_attrs_2_dict_translator
@@ -21,6 +23,46 @@ from tqdm import tqdm_notebook as tqdm
 logger = logging.getLogger('pipefinch.h5tools.kwik.kwdfunctions')
 
 
+@jit
+def get_slice_array(dset: np.ndarray, starts: np.ndarray, span: np.int, chan_list) -> np.ndarray:
+    n_slices = starts.size
+    #n_chan = dset.shape[1]
+    n_chan = chan_list.size
+    slices_array = np.zeros([n_slices, span, n_chan])
+    for i, start in enumerate(starts):
+        slices_array[i, :, :] = dset[start: start+span, chan_list]
+    return slices_array
+
+@h5_decorator(default_mode='r')
+def collect_frames_fast(kwd_file, recs_list, starts, span, chan_list):
+    recs = np.unique(recs_list)
+    all_frames_list = []
+    for i_rec, rec in tqdm(enumerate(recs), total=recs.size):
+        starts_from_rec = starts[recs_list == rec]
+        dset = get_data_set(kwd_file, rec)
+        n_samples = dset.shape[0]
+        valid_starts = starts_from_rec[(starts_from_rec > 0)
+                                       & (starts_from_rec + span < n_samples)]
+        if valid_starts.size < starts_from_rec.size:
+            logger.warn('Some frames were out of bounds and will be discarded')
+            logger.warn('will collect only {0} events...'.format(
+                valid_starts.size))
+
+        # get the dataset slices for only the channel list
+        this_rec_frames = get_slice_array(dset, valid_starts, span, chan_list)
+        all_frames_list.append(this_rec_frames)
+
+    try:
+        all_frames_array = np.concatenate(all_frames_list, axis=0)
+    except ValueError:
+        raise
+        # logger.warn('Failed to collect stream frames, return is nan array')
+        # zero_dset_shape = get_data_set(kwd_file, rec).shape
+        # all_frames_array = np.empty([1, *zero_dset_shape])
+        # all_frames_array[:] = np.nan
+    return all_frames_array
+
+
 def get_data_set(kwd_file, rec):
     """
     :param kwd_file:
@@ -29,6 +71,7 @@ def get_data_set(kwd_file, rec):
     """
     #logger.debug('Getting dataset from rec {}'.format(rec))
     return kwd_file['/recordings/{}/data'.format(rec)]
+
 
 
 def get_data_chunk(kwd_file: h5py.File, rec: np.int, start: np.int, span: np.int,
@@ -107,8 +150,8 @@ def get_data_size(kwd_file, rec):
 @h5_decorator(default_mode='r')
 def get_rec_sizes(kwd_file):
     rec_list = get_rec_list(kwd_file)
-    rec_sizes = {i: get_data_size(kwd_file, rec_list[i])
-                 for i in range(0, rec_list.size)}
+    rec_sizes = {rec: get_data_size(kwd_file, rec)
+                 for rec in rec_list}
     return rec_sizes
 
 
@@ -125,12 +168,14 @@ def get_rec_starts(kwd_file):
     return rec_starts
 
 @h5_decorator(default_mode='r')
-def get_frames(kwd_file, starts: np.ndarray, recs: np.ndarray, span: int, chan_list: np.ndarray):
+def get_frames(kwd_file, starts: np.ndarray, recs: np.ndarray, span: int, chan_names_list: np.ndarray, 
+    sess_meta_pd: pd.DataFrame):
     
     all_rec = np.unique(recs)
 
     all_rec_frames = []
     for r in all_rec:
+        chan_list = rec_chan_idx(sess_meta_pd, r, chan_names_list, block='analog')
         starts_rec = starts[recs == r]
         starts_rec.sort()
         frames = list(map(lambda x: get_data_chunk(kwd_file, r, x, span, chan_list), 

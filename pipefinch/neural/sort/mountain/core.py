@@ -34,7 +34,8 @@ def make_paths(ss_folder: str, out_subfolder_name: str='sort_out') -> dict:
                       'pre': 'pre.mda.prv',
                       'firings': 'firings.mda',
                       'firings_curated': 'firings_curated.mda',
-                      'cluster_metrics': 'cluster_metrics.json'
+                      'cluster_metrics': 'cluster_metrics.json',
+                      'cluster_metrics_curated': 'cluster_metrics_curated.json'
                       }
     out_folder_path = os.path.join(ss_folder, out_subfolder_name)
     file_paths = {k: os.path.join(ss_folder, v)
@@ -44,9 +45,9 @@ def make_paths(ss_folder: str, out_subfolder_name: str='sort_out') -> dict:
     return file_paths, out_folder_path
 
 
-def sort_dataset(*, file_paths: dict, freq_min: int=300, freq_max: int=6000,
+def sort_dataset(*, file_paths: dict, freq_min: int=600, freq_max: int=6000,
                  adjacency_radius: int=1, detect_threshold: float=3,
-                 dispatch_method: str='run', opts: dict={}):
+                 dispatch_method: str='run', opts: dict={}, no_auto_metrics=False):
 
     dataset_dir = os.path.split(file_paths['mda'])[0]
     output_dir = os.path.split(file_paths['filt'])[0]
@@ -99,26 +100,30 @@ def sort_dataset(*, file_paths: dict, freq_min: int=300, freq_max: int=6000,
         opts=opts
     )
 
-    # Compute cluster metrics
-    logger.info('Getting cluster metrics')
-    compute_cluster_metrics(
-        timeseries=file_paths['pre'],
-        firings=file_paths['firings'],
-        metrics_out=file_paths['cluster_metrics'],
-        samplerate=ds_params['samplerate'],
-        dispatch_method=dispatch_method,
-        opts=opts
-    )
+    if no_auto_metrics:
+        logger.warn('Auto metrics DISABLED. Will NOT compute cluster metrics nor auto curate')
 
-    # Automated curation
-    logger.info('Automatically curating')
-    automated_curation(
-        firings=file_paths['firings'],
-        cluster_metrics=file_paths['cluster_metrics'],
-        firings_out=file_paths['firings_curated'],
-        dispatch_method=dispatch_method,
-        opts=opts
-    )
+    else:
+        # Compute cluster metrics
+        logger.info('Getting cluster metrics')
+        compute_cluster_metrics(
+            timeseries=file_paths['pre'],
+            firings=file_paths['firings'],
+            metrics_out=file_paths['cluster_metrics'],
+            samplerate=ds_params['samplerate'],
+            dispatch_method=dispatch_method,
+            opts=opts
+        )
+
+        # Automated curation
+        logger.info('Automatically curating')
+        automated_curation(
+            firings=file_paths['firings'],
+            cluster_metrics=file_paths['cluster_metrics'],
+            firings_out=file_paths['firings_curated'],
+            dispatch_method=dispatch_method,
+            opts=opts
+        )
 
 
 # THE FUNCTIONS THAT RUN PROCESSES OR ADD THEM TO A Pipeline object
