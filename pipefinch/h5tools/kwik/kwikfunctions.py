@@ -252,6 +252,48 @@ class MdaKwikWriter(KwikFileWriter):
 
         # TODO: include cluster metrics (.json file)
 
+    def make_clu_groups(self, name='main'):
+        clu_grp_dict = {'mua': 1,
+                        'noise': 0,
+                        'unsorted': 3,
+                        'accepted': 2,
+                        'rejected': 9,
+                        'artifact': 5
+                        }
+
+        with open(self.file_names['cluster_metrics'], 'r') as f:
+            metrics = json.load(f)['clusters']
+            # loads a list of dictionaries with keys ['label', 'metrics']
+
+        with h5py.File(self.file_names['kwik'], 'r+') as kwf:
+            chan_group = kwf['/channel_groups'].require_group(
+                '{}'.format(self.chan_group))
+            clusters_group = chan_group.require_group('clusters')
+            desc_group = clusters_group.require_group(name)
+
+            for metric in metrics:
+                #clu_type = [x[1] for x in self.grp if x[0] == metric['label']]
+                #module_logger.info('metrics {}'.format(metric['metrics']))
+                # if there are tags in the json file, use them
+                # otherwise default is 'unsorted'
+                try:
+                    clu_type = metric['tags'][0]
+                except IndexError:
+                    clu_type = 'unsorted'
+                    metric['tags'] = ['unsorted']
+
+                attribs = [{'name': 'cluster_group',
+                            'data': clu_grp_dict[clu_type],
+                            'dtype': np.int64}]
+
+                this_cluster_group = insert_group(
+                    desc_group, str(metric['label']), attribs)
+                h5t.append_atrributes(this_cluster_group, metric['metrics'])
+                tags_list_utf8 = [h5t.h5_unicode_hack(
+                    x) for x in metric['tags']]
+                h5t.append_atrributes(this_cluster_group,
+                                      {'tags': tags_list_utf8})
+
 
 class KiloKwikFile(KwikFileWriter):
     # init the KwikFile class
@@ -333,7 +375,7 @@ def ref_to_rec_starts(rec_sizes: dict, t_array: np.ndarray) -> (np.ndarray, np.n
 
     for rec, size in rec_sizes.items():
         end = start + size
-        this_rec_spk = (t_array > start) & (t_array < end)
+        this_rec_spk = (t_array >= start) & (t_array < end)
         t_rec[this_rec_spk] = t_array[this_rec_spk] - start
         rec_array[this_rec_spk] = rec
         start = end

@@ -54,6 +54,8 @@ class Unit:
         self.main_chan = None
         self.main_wave = None
         self.waveform_pars = {}
+        self.unit_chan_names = np.empty(0)
+        self.unit_chans = np.empty(0)
 
         self.neural_port = port
 
@@ -62,6 +64,7 @@ class Unit:
             # self.get_qlt()
             self.get_time_stamps()
             self.get_rec_offsets()
+            self.get_unit_chans()
         self.get_attrs()
 
     # get time stamps of spiking events (in samples)
@@ -206,11 +209,17 @@ class Unit:
             'You are getting channel locations from one rec and using for all, mind that this only works if all recs have the same setting')
         sess_meta_pd = kwdf.get_all_rec_meta(self.kwd_path)
         wanted_chans = np.array([self.neural_port + '-'])
-        chan_names = kwdf.get_all_chan_names(
-            sess_meta_pd, chan_filt=wanted_chans)
-        sess_chans = kwdf.rec_chan_idx(
-            sess_meta_pd, 0, chan_names, block='analog')
+        chan_names = kwdf.get_all_chan_names(sess_meta_pd, chan_filt=wanted_chans)
+        sess_chans = kwdf.rec_chan_idx(sess_meta_pd, 0, chan_names, block='analog')
+        
+        self.unit_chan_names = chan_names
+        self.unit_chans = sess_chans
         return sess_chans
+    
+    def get_unit_chan_names(self):
+        if self.unit_chan_names.size == 0:
+            self.get_unit_chans()
+        return self.unit_chan_names
 
     def save_unit_spikes(self):
         unit_path = self.get_folder()
@@ -322,9 +331,13 @@ class Unit:
         a_w_f = self.get_avg_wave()
         main_chans = np.argsort(np.ptp(a_w_f, axis=0))[::-1][:n_chans]
         # logger.info('main chans {}'.format(main_chans))
-        main_chan_absolute = np.array(
-            self.waveform_pars['chan_list'])[main_chans]
+        main_chan_absolute = np.array(self.waveform_pars['chan_list'])[main_chans]
         return main_chans.astype(np.int), main_chan_absolute
+    
+    def get_unit_main_chans_names(self, n_chans=4):
+        main_chans_idx = self.get_unit_main_chans(n_chans=n_chans)
+        unit_chan_names = self.unit_chan_names
+        return unit_chan_names[main_chans_idx[1]]
 
     def get_unit_main_wave(self, n_chans=4):
         ch = self.get_unit_main_chans(n_chans=n_chans)[0]
@@ -355,7 +368,7 @@ class Unit:
         return np.median(widths), np.std(widths)
 
 
-def get_all_unit_waveforms(kwik_path, kwd_path, before=20, after=20):
+def get_all_unit_waveforms(kwik_path, kwd_path, port='A', before=20, after=20):
     units_list = kwkf.list_units(kwik_path)
     clu_list = units_list['clu']
 
@@ -363,7 +376,7 @@ def get_all_unit_waveforms(kwik_path, kwd_path, before=20, after=20):
         units_list.shape[0], kwik_path))
 
     def waveform_get(u): return Unit(
-        u, kwik_path, kwd_path).get_unit_spikes(before=before, after=after)
+        u, kwik_path, kwd_path, port=port).get_unit_spikes(before=before, after=after)
 
     Parallel(n_jobs=6)(delayed(waveform_get)(clu)
                        for clu in tqdm(clu_list, total=clu_list.size))
