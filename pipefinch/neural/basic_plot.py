@@ -1,5 +1,5 @@
 from __future__ import division
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, axes as axes
 import numpy as np
 import scipy as sp
 import math
@@ -194,3 +194,60 @@ def sparse_raster(x, nan=False):
     if not nan:
         raster[np.isnan(raster)] = 0
     return raster
+
+@jit(nopython=True)
+def plottable_array(x:np.ndarray, scale:np.ndarray, offset:np.ndarray) -> np.ndarray:
+    """ Rescale and offset an array for quick plotting multiple channels, along the 
+        1 axis, for each jth axis
+    Arguments:
+        x {np.ndarray} -- [n_col x n_row] array (each col is a chan, for instance)
+        scale {np.ndarray} -- [n_col] vector of scales (typically the ptp values of each row)
+        offset {np.ndarray} -- [n_col] vector offsets (typycally range (row))
+
+    Returns:
+        np.ndarray -- [n_row x n_col] scaled, offsetted array to plot
+    """
+    # for each row [i]:
+    # - divide by scale_i
+    # - add offset_i
+    n_row, n_col = x.shape
+    for col in range(n_col):
+        for row in range(n_row):
+            x[row, col] = x[row, col] * scale[col] + offset[col]
+    return x
+
+
+def plot_array(x: np.ndarray, scale='each', ax=None) -> axes.Axes:
+
+    """ Rescale and offset an array for quick plotting multiple channels, along the 
+        1 axis, for each jth axis
+    Arguments:
+        x {np.ndarray} -- [n_col x n_row] array (each col is a chan, for instance)
+    
+    Keyword Arguments:
+        scale {str} -- {'each', 'max'} (default: {'each'}) whether to scale within each col
+                        or to the max ptp of all cols
+        ax {[type]} -- [description] (default: {None})
+    
+    Returns:
+        axes.Axes -- [description]
+    """
+    if ax is None:
+        _, ax = plt.subplots()
+    
+    # arrange the array:
+    n_row, n_col = x.shape
+    offset = - np.arange(n_col)
+    ptp = np.ptp(x, axis=0)
+    if scale is 'max':
+        ptp[:] = np.max(ptp)
+    
+    x_scaled = plottable_array(x, 1./ptp, offset)
+    ax.plot(x_scaled)
+
+    
+
+
+
+
+

@@ -1,10 +1,14 @@
 import os
 import socket
 import json
+import logging
+
+logger = logging.getLogger('pipefinch.pipeline.filestructure')
 
 locations_dict = dict()
-locations_dict['zebra'] = {'mnt': os.path.abspath('/data/experiment'),
-                           'local': os.path.abspath('/data/experiment')}
+locations_dict['zebra'] = {'mnt': os.path.abspath('/mnt/zuperfinch/microdrive/birds'),
+                           'local': os.path.abspath('/data/experiment/microdrive'), 
+                           'fast': os.path.abspath('/mnt/scratch/experiment')}
 locations_dict['ZOROASTRO'] = {'mnt': os.path.abspath('B:\microdrive\data'),
                                'local': os.path.abspath('D:\microdrive')}
 locations_dict['lookfar'] = {'mnt': os.path.abspath('/Users/zeke/experiment'),
@@ -32,12 +36,39 @@ def read_json_exp_struct():
     raise NotImplementedError
 
 
-def get_file_structure(location: dict, sess_par: dict, live_like_animals=True) -> dict:
-    if live_like_animals:
-        ephys_folder = 'Ephys'
-    else:
-        ephys_folder = 'ephys'
+def get_file_structure(location: dict, sess_par: dict) -> dict:
+    """[summary]
+    Arguments:
+        location {dict} -- [description]
+        sess_par {dict} -- session parameters dictionary. Example:
+            sess_par = {'bird': 'p1j1',
+            'sess': '2019-02-27_1800_02', 
+            'probe': 'probe_0',
+            'sort': 0} 
+            - bird and sess are self-explanatory and refer to the folder of the raw, kwd files.
+            - probe describes the probe that was used to do the sorting, which in turn determines
+              neural port (via the rig.json file) and probe mapping (via rig.json file and 
+              pipefinch.pipeline.filestructure.probes)
+            - sort determines the version of sorting, in case multiple sorts were made on the same
+              session (e.g different time spans, different configurations of the sorting algorithm)
+              if the field is not present or is None, the .kwik, unit_waveforms and rasters will be directly
+              in the Ephys\kwik\sess_id folder.
+              otherwise, a 'sort_x' folder will contain the sorting files.
 
+    Returns:
+        dict -- ditcionary containing paths of folders and files.
+            exp_struct['folders']: dictionary with ['raw', 'kwik', 'msort'] keys
+            exp_struct['files']: dictionary with keys:
+                'par': expermient.json path
+                'set': settings.isf intan generated file path
+                'rig': rig.json file desribing the recording settings (channels/signals)
+
+                'kwd': kwd file with all raw data from the session
+                'kwik': kwik file with sorted spikes
+                'kwe': 
+    """
+
+    ephys_folder = 'Ephys'
     exp_struct = {}
     bird, sess = sess_par['bird'], sess_par['sess']
 
@@ -57,21 +88,30 @@ def get_file_structure(location: dict, sess_par: dict, live_like_animals=True) -
     for f, n in zip(['kwd', 'kwik', 'kwe'], ['streams.kwd', 'spikes.kwik', 'events.kwe']):
         exp_struct['files'][f] = os.path.join(exp_struct['folders']['kwik'], n)
 
+    if 'sort' in sess_par and sess_par['sort'] is not None:
+        exp_struct['files']['kwik'] = os.path.join(exp_struct['folders']['kwik'], 
+        'sort_{}'.format(sess_par['sort']), 'spikes.kwik')
+
     # the aux, temporary mountainsort files. these will be deleted after sorting
+    # try 'fast' location first, if it does not exist, go for 'local'
+    try:
+        msort_location = location['fast']
+    except KeyError:
+        msort_location = location['local']
+
     exp_struct['folders']['msort'] = os.path.join(
-        location['local'], bird, ephys_folder, 'msort', sess)
+        msort_location, bird, ephys_folder, 'msort', sess)
     for f, n in zip(['mda_raw', 'par'], ['raw.mda', 'params.json']):
         exp_struct['files'][f] = os.path.join(
             exp_struct['folders']['msort'], n)
-
     return exp_struct
 
 
-def get_exp_struct(bird, sess, location_dict: dict = dict(), live_like_animals=True):
+def get_exp_struct(bird, sess, sort=None, location_dict: dict = dict()):
     # get the configuration of the experiment:
     # if environment variable 'EXPERIMENT_PATH' exists,
     # read 'EXPERIMENT_PATH/config/expstruct.json'
-    # no location dict was entered, try to get it
+    # no location dict was entered, try to get it from the hostname (from locations_dict)
     if location_dict:
         pass
     else:
@@ -88,8 +128,9 @@ def get_exp_struct(bird, sess, location_dict: dict = dict(), live_like_animals=T
 
     # make the exp struct dict.
     sess_par_dict = {'bird': bird,
-                     'sess': sess}
-    exp_struct = get_file_structure(location_dict, sess_par_dict, live_like_animals=live_like_animals)
+                     'sess': sess,
+                     'sort': sort}
+    exp_struct = get_file_structure(location_dict, sess_par_dict)
 
     return exp_struct
 
@@ -104,3 +145,14 @@ def get_probe_port(exp_struct:dict, selected_probe:str) -> str:
     rig_par = get_rig_par(exp_struct)
     probe_port = rig_par['chan']['port'][selected_probe].strip('-')
     return probe_port
+
+
+def msort_cleanup(exp_struct: dict):
+    # remove the mda files
+    mda_raw_path = exp_struct['files']['mda_raw']
+    logger.info('removing (if exists) msort mda file {} '.format(mda_raw_path))
+    try:
+        os.remove(mda_raw_path)
+    except FileNotFoundError:
+        logger.debug('Nuttin done, file wasnt there')
+    

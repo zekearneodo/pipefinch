@@ -1,7 +1,10 @@
 import os
+import shutil
+import glob
 import logging
 import json
 import warnings
+import subprocess
 
 from mountainlab_pytools import mdaio
 from mountainlab_pytools import mlproc as mlp
@@ -11,6 +14,37 @@ logger = logging.getLogger('pipefinch.sort.mountain.comre')
 # dispatch dictionary for run/add process to pipeline
 process_dispatch_dict = {#'add': mlp.addProcess,
                          'run': mlp.runProcess}
+
+def read_ml_config() -> list:
+    return subprocess.Popen('ml-config', shell=True, stdout=subprocess.PIPE).stdout.read().decode('utf-8').split('\n')
+
+def list_ml_config_keys() -> list:
+    ml_config_lines = read_ml_config()
+    ml_key_lines = [l for l in ml_config_lines if (':' in l and not l.endswith(':')) ]
+    return ml_key_lines
+    
+def read_ml_config_value(key: str)->str:
+    ml_config_lines = read_ml_config()
+    key_lines = [l for l in ml_config_lines if '{}:'.format(key) in l]
+    if not len(key_lines) == 1:
+        raise ValueError
+    else:
+        key_value = key_lines[0].strip('\'').split(':')[1].strip(' ')
+    return key_value
+
+def clean_directory(dir_path):
+    dir_contents = glob.glob(os.path.join(dir_path, '*'))
+    for i in dir_contents:
+        if os.path.isdir(i):
+            shutil.rmtree(i)
+        else:
+            os.unlink(i)
+
+def clean_tmp_dir():
+    tmp_dir_path = os.path.abspath(read_ml_config_value('Temporary directory'))
+    logger.info('Cleaning up msort temp dir {}'.format(tmp_dir_path))
+    # remove all files
+    clean_directory(tmp_dir_path)
 
 
 def make_paths(ss_folder: str, out_subfolder_name: str='sort_out') -> dict:

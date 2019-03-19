@@ -8,6 +8,7 @@ import tqdm
 
 import h5py
 import numpy as np
+import pandas as pd
 from numba import jit
 from scipy import signal as ss
 from scipy.io import wavfile
@@ -97,12 +98,14 @@ class KwikFileWriter:
     kwik_path = ''
     chan_group = 0
     rec_sizes = np.empty(0)
+    # recs that were included in the sorted binary file
+    rec_in_bin = np.empty(0)
 
     spk = np.empty(0)  # spikes tstamps (samples) 1d array
     clu = np.empty(0)  # clusters id matching spk, 1d array
     grp = tuple()  # tuple of (clu, sorted_descriptor)
 
-    def __init__(self, file_names, chan_group=0):
+    def __init__(self, file_names: dict, chan_group: int = 0, rec_in_binary: np.ndarray = np.empty(0)):
         self.file_names = file_names
         self.chan_group = chan_group
         self.kwd_path = file_names['kwd']
@@ -115,6 +118,7 @@ class KwikFileWriter:
         #     exec (f.read())
         #     self.s_f = sample_rate
         self.s_f = kutil.get_record_sampling_frequency(self.kwd_path)
+        self.rec_in_bin = rec_in_binary
         self.create_kwf()
 
     def create_kwf(self):
@@ -130,14 +134,24 @@ class KwikFileWriter:
         # self.spk
         raise NotImplementedError
 
+    def get_rec_sizes_in_bin(self):
+        # get the rec sizes
+        # filter all the ones who are present in the binary file
+        with h5py.File(self.kwd_path, 'r') as kwd:
+            rec_sizes = kwdf.get_rec_sizes(kwd)
+        if self.rec_in_bin.size == 0:
+            self.rec_sizes = rec_sizes
+        else:
+            self.rec_sizes = {k: rec_sizes[k] for k in self.rec_in_bin}
+
     def make_spk_tables(self, realign_to_recordings=True):
         # needs to have filled
         # self.spk
         # self.clu
 
-        with h5py.File(self.kwd_path, 'r') as kwd:
-            self.rec_sizes = kwdf.get_rec_sizes(kwd)
-
+        # fill the self.rec_sizes values
+        self.get_rec_sizes_in_bin()
+        # refer to starts, counting from the first present rec in the binary
         self.rec_kwik, self.spk_kwik = ref_to_rec_starts(self.rec_sizes,
                                                          self.spk)
 
@@ -204,8 +218,11 @@ class KwikFileWriter:
                         }
 
         with open(self.file_names['cluster_metrics'], 'r') as f:
-            metrics = json.load(f)['clusters']
+            all_metrics = json.load(f)['clusters']
             # loads a list of dictionaries with keys ['label', 'metrics']
+        accepted_clu = np.unique(self.clu)
+        accepted_metrics = [
+            m for m in all_metrics if m['label'] in accepted_clu]
 
         with h5py.File(self.file_names['kwik'], 'r+') as kwf:
             chan_group = kwf['/channel_groups'].require_group(
@@ -213,7 +230,7 @@ class KwikFileWriter:
             clusters_group = chan_group.require_group('clusters')
             desc_group = clusters_group.require_group(name)
 
-            for metric in metrics:
+            for metric in accepted_metrics:
                 #clu_type = [x[1] for x in self.grp if x[0] == metric['label']]
                 #module_logger.info('metrics {}'.format(metric['metrics']))
                 # if there are tags in the json file, use them
@@ -241,8 +258,9 @@ class MdaKwikWriter(KwikFileWriter):
     mda_params = dict()
     # init the KwikFile class
 
-    def __init__(self, file_names, chan_group=0):
-        super(MdaKwikWriter, self).__init__(file_names, chan_group=chan_group)
+    def __init__(self, file_names, chan_group=0, rec_in_binary=np.empty(0)):
+        super(MdaKwikWriter, self).__init__(file_names, chan_group=chan_group,
+                                            rec_in_binary=rec_in_binary)
 
     def get_clusters(self):
         spk_data = mdaio.readmda(self.file_names['firings'])
@@ -295,58 +313,6 @@ class MdaKwikWriter(KwikFileWriter):
                                       {'tags': tags_list_utf8})
 
 
-class KiloKwikFile(KwikFileWriter):
-    # init the KwikFile class
-    def __init__(self, file_names, chan_group=0):
-        super(KiloKwikFile, self).__init__(ch, h5_file=kwd_file)
-        self.file_names = file_names
-        if file_names['clu']:
-            self.clu = np.squeeze(np.load(file_names['clu']))
-        elif file_names['temp']:
-            self.clu = np.squeeze(np.load(file_names['temp']))
-        else:
-            raise IOError(
-                'both spike_clusters.npy and spike_templates.npy weren\'t found')
-        self.spk = np.load(file_names['spk'])
-
-        if file_names['grp'] and os.path.isfile(file_names['grp']):
-            print('Found grp file')
-            self.grp = load_grp_file(file_names['grp'])
-        else:
-            print('No grp file found')
-            self.grp = [(i, 'unsorted') for i in np.unique(self.clu)]
-        self.rec_kwik = None
-        self.spk_kwik = None
-        self.kwf = None
-        self.chan_group = chan_group
-        # with open(file_names['par']) as f:
-        #     exec (f.read())
-        #     self.s_f = sample_rate
-        self.s_f = kutil.get_record_sampling_frequency(file_names['kwd'])
-        self.create_kwf()
-
-    def make_spk_tables(self):
-        with h5py.File(self.file_names['kwd'], 'r') as kwd:
-            rec_sizes = kwdf.get_rec_sizes(kwd)
-            self.rec_kwik, self.spk_kwik = ref_to_rec_starts(
-                rec_sizes, self.spk)
-
-        with h5py.File(self.file_names['kwk'], 'r+') as kwf:
-            chan_group = kwf['/channel_groups'].require_group(
-                '{}'.format(self.chan_group))
-            spikes_group = chan_group.require_group('spikes')
-            h5t.insert_table(
-                spikes_group, self.rec_kwik.flatten(), 'recording')
-            h5t.insert_table(
-                spikes_group, self.spk_kwik.flatten(), 'time_samples')
-            h5t.insert_table(
-                spikes_group, self.spk_kwik.flatten() / self.s_f, 'time_fractional')
-
-            clusters_group = spikes_group.require_group('clusters')
-            h5t.insert_table(clusters_group, self.clu, 'main')
-            h5t.insert_table(clusters_group, self.clu, 'original')
-
-
 def make_shank_kwd(raw_file, out_file_path, chan_list):
     raise NotImplementedError
     # ss_file = h5py.File(out_file_path, 'w')
@@ -383,7 +349,9 @@ def ref_to_rec_starts(rec_sizes: dict, t_array: np.ndarray) -> (np.ndarray, np.n
     return rec_array, t_rec
 
 
-def mda_to_kwik(kwd_path: str, kwik_path: str, mda_firings_path: str, metrics_path: str, realign_to_recordings: bool = True):
+def mda_to_kwik(kwd_path: str, kwik_path: str, mda_firings_path: str, metrics_path: str,
+                realign_to_recordings: bool = True,
+                rec_in_binary: np.ndarray = np.empty(0)):
     file_names = {'kwd': kwd_path,
                   'kwik': kwik_path,
                   'firings': mda_firings_path,
@@ -391,62 +359,10 @@ def mda_to_kwik(kwd_path: str, kwik_path: str, mda_firings_path: str, metrics_pa
 
     module_logger.info('Creating kwik file {} from firings {}'.format(
         kwik_path, mda_firings_path))
-
-    kwik_file_writer = MdaKwikWriter(file_names)
+    os.makedirs(os.path.split(kwik_path)[0], exist_ok=True)
+    kwik_file_writer = MdaKwikWriter(file_names, rec_in_binary=rec_in_binary)
     kwik_file_writer.get_clusters()
     kwik_file_writer.make_spk_tables(realign_to_recordings=True)
     kwik_file_writer.make_rec_groups()
     kwik_file_writer.make_clu_groups()
     return kwik_file_writer
-
-
-def kilo_to_kwik(bird, sess, file_names=None, location='ss', chan_group=0):
-    raise NotImplementedError
-    # Todo: make it not depend on the experiment structure.
-    # these functions should all take paths and files as arguments.
-    # module_logger.info('Creating kwik file for bird: {} sess: {}'.format(bird, sess))
-    # if file_names is None:
-    #     file_names = dict(
-    #         clu='spike_clusters.npy',
-    #         spk='spike_times.npy',
-    #         grp='cluster_groups.csv',
-    #         par='params.py',
-    #         temp='spike_templates.npy',
-    #         kwd='experiment.raw.kwd',
-    #         kwk='experiment.kwik')
-
-    # fn = et.file_names(bird, sess)
-    # for key, value in file_names.items():
-    #     file_names[key] = os.path.join(fn['folders'][location], value)
-
-    # # Check whether there is manual sort or not:
-    # if not os.path.isfile(file_names['clu']):
-    #     module_logger.info('Clu not found, will assume no manual sorting was done')
-    #     file_names['clu'] = None
-    #     file_names['grp'] = None
-    #     module_logger.debug(file_names)
-    # else:
-    #     module_logger.info('Found clu file, will attempt to unpack manual sorted data from kilosort')
-    #     file_names['temp'] = None
-    #     module_logger.debug(file_names)
-
-    # k = KwikFile(file_names, chan_group=chan_group)
-    # module_logger.info('Making spike tables')
-    # k.make_spk_tables()
-    # module_logger.info('Making rec tables (make_rec_groups)')
-    # k.make_rec_groups()
-    # module_logger.info('Making cluster group tables')
-    # k.make_clu_groups()
-
-    # module_logger.info('Moving files to their sort folder')
-    # sort_kilo_dir = os.path.join(fn['folders'][location],
-    #                              'kilo_{:02d}'.format(chan_group))
-    # os.makedirs(sort_kilo_dir, exist_ok=True)
-    # py_files = glob.glob(os.path.join(fn['folders'][location], '*.py'))
-    # npy_files = glob.glob(os.path.join(fn['folders'][location], '*.npy'))
-    # for src in py_files + npy_files:
-    #     shutil.move(src, sort_kilo_dir)
-    # module_logger.info('Removing temporary .dat file')
-    # dat_file = os.path.join(fn['folders'][location], 'experiment.dat')
-    # os.remove(dat_file)
-    # module_logger.info('Done')

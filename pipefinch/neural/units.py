@@ -17,6 +17,7 @@ from pipefinch.h5tools.core import h5tools as h5t
 
 logger = logging.getLogger('pipefinch.neural.units')
 
+
 @jit(nopython=True)
 def offset_timestamps(t, r, rec_offset):
     t_offset = np.zeros_like(t)
@@ -24,8 +25,9 @@ def offset_timestamps(t, r, rec_offset):
         t_i += rec_offset[r_i]
     return t_offset
 
+
 class Unit:
-    def __init__(self, clu: int, kwik_path: str = '', kwd_path: str = '', group=0, port='A'):
+    def __init__(self, clu: int, kwik_path: str, kwd_path: str = '', group=0, port='A'):
 
         self.clu = clu
         self.group = group
@@ -48,7 +50,7 @@ class Unit:
 
         self.kwd_file = None
         self.all_waveforms = None  # all of the waveforms
-        self.n_waveforms = 100  # sample of waveforms to show/compute
+        self.n_waveforms = 10000  # sample of waveforms to show/compute
         self.waveforms = None
         self.avg_waveform = None
         self.main_chan = None
@@ -59,17 +61,17 @@ class Unit:
 
         self.neural_port = port
 
-        if kwik_path is not None:
+        if not kwd_path == '':
             self.get_sampling_rate()
             # self.get_qlt()
             self.get_time_stamps()
             self.get_rec_offsets()
             self.get_unit_chans()
-        self.get_attrs()
+            self.get_attrs()
 
     # get time stamps of spiking events (in samples)
 
-    def get_time_stamps(self, absolute_time: np.bool=False):
+    def get_time_stamps(self, absolute_time: np.bool = False):
         assert (self.kwik_path is not None)
         clu_path = "/channel_groups/{0:d}/spikes/clusters/main".format(
             self.group)
@@ -175,28 +177,30 @@ class Unit:
     def get_isi(self):
         if self.time_samples is None:
             self.get_time_stamps()
-        
+
         if self.recording_offsets is None:
             self.get_rec_offsets()
 
-        rec_starts = np.array([self.recording_offsets[r] for r in self.recordings])
+        rec_starts = np.array([self.recording_offsets[r]
+                               for r in self.recordings])
         offset_timestamps = self.time_samples + rec_starts
         offset_timestamps.sort()
 
-        all_isi_ms = np.round(np.diff(offset_timestamps) / (self.sampling_rate * 0.001))
+        all_isi_ms = np.round(np.diff(offset_timestamps) /
+                              (self.sampling_rate * 0.001))
         return all_isi_ms
 
-    def get_isi_dist(self, bin_size_ms=1, max_t=100):
+    def get_isi_dist(self, bin_size_ms=0.5, max_t=20):
 
         all_isi_ms = self.get_isi()
 
         bins = np.arange(0, max_t, bin_size_ms)
         hist, bins = np.histogram(all_isi_ms, bins)
 
-        bins = bins[1:]
-        two_side_bins = np.concatenate([-bins[::-1], bins[1:]])
-        two_side_hist = np.concatenate([hist[::-1], hist[1:]])
-        return two_side_bins, two_side_hist
+        bins = bins[:-1]
+        #two_side_bins = np.concatenate([-bins[::-1], bins[1:]])
+        #two_side_hist = np.concatenate([hist[::-1], hist[1:]])
+        return bins, hist
 
     def get_folder(self):
         return os.path.split(os.path.abspath(self.kwik_path))[0]
@@ -205,17 +209,19 @@ class Unit:
         # this is inefficiet and can lead to errors if channels change across recordings
         # the right thing to do is to fill it up when going from mda to kwik
         # load parameters
-        logger.warning(
-            'You are getting channel locations from one rec and using for all, mind that this only works if all recs have the same setting')
+        # logger.warning(
+        #     'You are getting channel locations from one rec and using for all, mind that this only works if all recs have the same setting')
         sess_meta_pd = kwdf.get_all_rec_meta(self.kwd_path)
         wanted_chans = np.array([self.neural_port + '-'])
-        chan_names = kwdf.get_all_chan_names(sess_meta_pd, chan_filt=wanted_chans)
-        sess_chans = kwdf.rec_chan_idx(sess_meta_pd, 0, chan_names, block='analog')
-        
+        chan_names = kwdf.get_all_chan_names(
+            sess_meta_pd, chan_filt=wanted_chans)
+        sess_chans = kwdf.rec_chan_idx(
+            sess_meta_pd, 0, chan_names, block='analog')
+
         self.unit_chan_names = chan_names
         self.unit_chans = sess_chans
         return sess_chans
-    
+
     def get_unit_chan_names(self):
         if self.unit_chan_names.size == 0:
             self.get_unit_chans()
@@ -268,13 +274,12 @@ class Unit:
                               'after': after,
                               'chan_list': np.array(chan_list)}
 
-
         try:
             assert valid_times.size > 1, 'no valid events'
             # get a random sample of max_events elements
             sample = np.random.choice(np.arange(valid_times.size),
-                                  size=min(max_events, valid_times.size),
-                                  replace=False)
+                                      size=min(max_events, valid_times.size),
+                                      replace=False)
             self.all_waveforms = kwdf.collect_frames_fast(self.kwd_path,
                                                           valid_recs[sample],
                                                           valid_times[sample] -
@@ -292,7 +297,7 @@ class Unit:
 
     def load_all_waveforms(self):
         folder = self.get_folder()
-        f_name = 'unit_{:03d}.npy'.format(self.clu)
+        f_name = 'unit_{}_{:03d}.npy'.format(self.group, self.clu)
         return np.load(os.path.join(folder, 'unit_waveforms', f_name), mmap_mode='r')
 
     def set_n_waveforms(self, n_waveforms):
@@ -316,8 +321,8 @@ class Unit:
         self.waveforms = self.all_waveforms[waveform_samples, :, :]
         return self.waveforms
 
-    def get_avg_wave(self):
-        if self.waveforms is None:
+    def get_avg_wave(self, force=False):
+        if (self.waveforms is None) or force:
             self.get_waveforms()
         return np.mean(self.waveforms, axis=0)
 
@@ -329,11 +334,13 @@ class Unit:
 
     def get_unit_main_chans(self, n_chans=4):
         a_w_f = self.get_avg_wave()
-        main_chans = np.argsort(np.ptp(a_w_f, axis=0))[::-1][:n_chans]
+        main_chans_idx = np.argsort(np.ptp(a_w_f, axis=0))[::-1][:n_chans]
         # logger.info('main chans {}'.format(main_chans))
-        main_chan_absolute = np.array(self.waveform_pars['chan_list'])[main_chans]
-        return main_chans.astype(np.int), main_chan_absolute
-    
+        main_chan_absolute = np.array(
+            self.waveform_pars['chan_list'])[main_chans_idx]
+        # main_chan_absolute is the actual order of the channel in the array
+        return main_chans_idx.astype(np.int), main_chan_absolute
+
     def get_unit_main_chans_names(self, n_chans=4):
         main_chans_idx = self.get_unit_main_chans(n_chans=n_chans)
         unit_chan_names = self.unit_chan_names
@@ -368,7 +375,8 @@ class Unit:
         return np.median(widths), np.std(widths)
 
 
-def get_all_unit_waveforms(kwik_path, kwd_path, port='A', before=20, after=20):
+def get_all_unit_waveforms(kwik_path, kwd_path, port='A', before=20, after=20,
+                           max_events=5000):
     units_list = kwkf.list_units(kwik_path)
     clu_list = units_list['clu']
 
@@ -376,7 +384,9 @@ def get_all_unit_waveforms(kwik_path, kwd_path, port='A', before=20, after=20):
         units_list.shape[0], kwik_path))
 
     def waveform_get(u): return Unit(
-        u, kwik_path, kwd_path, port=port).get_unit_spikes(before=before, after=after)
+        u, kwik_path, kwd_path, port=port).get_unit_spikes(before=before,
+                                                           after=after,
+                                                           max_events=max_events)
 
     Parallel(n_jobs=6)(delayed(waveform_get)(clu)
                        for clu in tqdm(clu_list, total=clu_list.size))
