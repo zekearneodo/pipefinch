@@ -74,7 +74,7 @@ class Session:
         # get all the units meta
         self.get_units_meta()
 
-        #load the rig parameters
+        # load the rig parameters
         self.load_rig_par()
 
         # set visualization parameters
@@ -164,6 +164,12 @@ class Session:
         #logger.info('unit main chans {}'.format(unit_main_chans))
         return all_ch_array[:, :, unit_main_chans]
 
+    def get_unit(self, clu: int, group: int = 0) -> un.Unit:
+        # create a unit object with the kwd, kwik files and a clu number
+        return un.Unit(clu, self.kwik_path, self.kwik_path,
+                       group=group,
+                       port=self.probe_port)
+
     def get_units_meta(self):
         # - get the recarray of the units in the kwik file
         #   (with the group, clu, qlt)
@@ -178,13 +184,14 @@ class Session:
             d['tags'].append(a_unit.get_attrs()['tags'])
 
         self.units_meta_pd = pd.concat([all_clu_meta_pd, pd.DataFrame(d)],
-                                    axis=1)
+                                       axis=1)
 
         for tag in self.get_unit_tags():
-            self.units_meta_pd[tag] = self.units_meta_pd['tags'].apply(lambda x: tag in x)
-        
+            self.units_meta_pd[tag] = self.units_meta_pd['tags'].apply(
+                lambda x: tag in x)
+
     def get_unit_tags(self):
-        if self.units_meta_pd.size==0:
+        if self.units_meta_pd.size == 0:
             self.get_units_meta()
         return np.unique(np.concatenate(self.units_meta_pd['tags'].values).flatten())
 
@@ -288,8 +295,6 @@ def plot_unit(sess: Session, clu: int, fig=None, example_event_id: int = 0):
     ax.yaxis.tick_right()
     ax.axhline(y=isi_mua_threshold, color='C7', linestyle=':')
     ax.axvline(x=1, color='C5', linestyle=':')
-    
-
 
     # plot main waveform
     main_wave = a_unit.get_unit_main_wave(n_chans=4)
@@ -313,7 +318,8 @@ def plot_unit(sess: Session, clu: int, fig=None, example_event_id: int = 0):
 
 def plot_all_units(sess, only_tags=['accepted', 'mua', 'unsorted'], example_event_idx: int = 0):
     units_list = kwkf.list_units(sess.kwik_path)
-    rasters_path = os.path.join(sess.exp_struct['folders']['kwik'], 'rasters')
+    kwik_folder = os.path.split(sess.kwik_path)[0]
+    rasters_path = os.path.join(kwik_folder, 'rasters')
     os.makedirs(rasters_path, exist_ok=True)
     for clu in units_list['clu']:
         a_unit = un.Unit(clu, sess.kwik_path, sess.kwd_path,
@@ -323,7 +329,7 @@ def plot_all_units(sess, only_tags=['accepted', 'mua', 'unsorted'], example_even
         if (not 'rejected' in unit_tags) and any([x in unit_tags for x in only_tags]):
             try:
                 fig = plot_unit(sess, clu, example_event_id=example_event_idx)
-                fig_file = 'unit_{}_{:03d}.png'.format(0, clu)
+                fig_file = '{}_unit_{}_{:03d}.png'.format(unit_tags[0], clu)
                 fig.savefig(os.path.join(rasters_path, fig_file),
                             bbox_inches='tight')
             except:
