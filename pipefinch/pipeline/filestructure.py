@@ -11,8 +11,10 @@ locations_dict['zebra'] = {'mnt': os.path.abspath('/mnt/zuperfinch/microdrive/bi
                            'fast': os.path.abspath('/mnt/scratch/experiment')}
 locations_dict['ZOROASTRO'] = {'mnt': os.path.abspath('B:\microdrive\data'),
                                'local': os.path.abspath('D:\microdrive')}
-locations_dict['lookfar'] = {'mnt': os.path.abspath('/Users/zeke/experiment'),
-                             'local': os.path.abspath('/Users/zeke/experiment')}
+locations_dict['lookfar'] = {'mnt': os.path.abspath('/Volumes/Samsung_X5/microdrive'),
+                             'local': os.path.abspath('/Volumes/Samsung_X5/microdrive'),
+                             'fast': os.path.abspath('/Volumes/Samsung_X5/scratch')
+                             }
 # Zinch in windows
 locations_dict['Zinch'] = {'mnt': '\\\\ZUPERFINCHJR\storage\Data',
                            'local': os.path.abspath('C:\experiment')}
@@ -99,11 +101,20 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
     except KeyError:
         msort_location = location['local']
 
+    # MOUNTAINSORT FILE STRUCTURE  
     exp_struct['folders']['msort'] = os.path.join(
         msort_location, bird, ephys_folder, 'msort', sess)
     for f, n in zip(['mda_raw', 'par'], ['raw.mda', 'params.json']):
         exp_struct['files'][f] = os.path.join(
             exp_struct['folders']['msort'], n)
+    
+    # KILOSORT FILE STRUCTURE
+    exp_struct['folders']['ksort'] = os.path.join(
+    msort_location, bird, ephys_folder, 'ksort', sess)
+    for f, n in zip(['bin_raw', 'par'], ['raw.bin', 'params.json']):
+        exp_struct['files'][f] = os.path.join(
+            exp_struct['folders']['ksort'], n)
+    
     return exp_struct
 
 

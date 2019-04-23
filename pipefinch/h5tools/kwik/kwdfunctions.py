@@ -185,6 +185,11 @@ def get_frames(kwd_file, starts: np.ndarray, recs: np.ndarray, span: int, chan_n
     all_frames_array = np.concatenate(all_rec_frames, axis=0)
     return all_frames_array
 
+@h5_decorator(default_mode='r')
+def get_data_type(kwd_file: h5py.File):
+    all_rec_list = get_rec_list(kwd_file)
+    first_dataset = get_data_set(kwd_file, all_rec_list[0])
+    return first_dataset.dtype
 
 @h5_decorator(default_mode='r')
 def get_all_rec_meta(kwd_file: h5py.File) -> pd.DataFrame:
