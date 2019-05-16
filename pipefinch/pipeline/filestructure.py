@@ -9,6 +9,10 @@ locations_dict = dict()
 locations_dict['zebra'] = {'mnt': os.path.abspath('/mnt/zuperfinch/microdrive/birds'),
                            'local': os.path.abspath('/data/experiment/microdrive'), 
                            'fast': os.path.abspath('/mnt/scratch/experiment')}
+
+locations_dict['zpikezorter'] = {'mnt': os.path.abspath('/mnt/microdrive/birds'),
+                           'local': os.path.abspath('/data/experiment/microdrive')}
+
 locations_dict['ZOROASTRO'] = {'mnt': os.path.abspath('B:\microdrive\data'),
                                'local': os.path.abspath('D:\microdrive')}
 locations_dict['lookfar'] = {'mnt': os.path.abspath('/Users/zeke/experiment'),
