@@ -7,8 +7,12 @@ logger = logging.getLogger('pipefinch.pipeline.filestructure')
 
 locations_dict = dict()
 locations_dict['zebra'] = {'mnt': os.path.abspath('/mnt/zuperfinch/microdrive/birds'),
-                           'local': os.path.abspath('/data/experiment/microdrive'), 
+                           'local': os.path.abspath('/data/experiment/microdrive'),
                            'fast': os.path.abspath('/mnt/scratch/experiment')}
+
+locations_dict['zpikezorter'] = {'mnt': os.path.abspath('/mnt/microdrive/birds'),
+                                 'local': os.path.abspath('/data/experiment/microdrive')}
+
 locations_dict['ZOROASTRO'] = {'mnt': os.path.abspath('B:\microdrive\data'),
                                'local': os.path.abspath('D:\microdrive')}
 locations_dict['lookfar'] = {'mnt': os.path.abspath('/Volumes/Samsung_X5/microdrive'),
@@ -91,8 +95,8 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
         exp_struct['files'][f] = os.path.join(exp_struct['folders']['kwik'], n)
 
     if 'sort' in sess_par and sess_par['sort'] is not None:
-        exp_struct['files']['kwik'] = os.path.join(exp_struct['folders']['kwik'], 
-        'sort_{}'.format(sess_par['sort']), 'spikes.kwik')
+        exp_struct['files']['kwik'] = os.path.join(exp_struct['folders']['kwik'],
+                                                   'sort_{}'.format(sess_par['sort']), 'spikes.kwik')
 
     # the aux, temporary mountainsort files. these will be deleted after sorting
     # try 'fast' location first, if it does not exist, go for 'local'
@@ -101,20 +105,20 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
     except KeyError:
         msort_location = location['local']
 
-    # MOUNTAINSORT FILE STRUCTURE  
+    # MOUNTAINSORT FILE STRUCTURE
     exp_struct['folders']['msort'] = os.path.join(
         msort_location, bird, ephys_folder, 'msort', sess)
     for f, n in zip(['mda_raw', 'par'], ['raw.mda', 'params.json']):
         exp_struct['files'][f] = os.path.join(
             exp_struct['folders']['msort'], n)
-    
+
     # KILOSORT FILE STRUCTURE
     exp_struct['folders']['ksort'] = os.path.join(
-    msort_location, bird, ephys_folder, 'ksort', sess)
+        msort_location, bird, ephys_folder, 'ksort', sess)
     for f, n in zip(['bin_raw', 'par'], ['raw.bin', 'params.json']):
         exp_struct['files'][f] = os.path.join(
             exp_struct['folders']['ksort'], n)
-    
+
     return exp_struct
 
 
@@ -145,13 +149,15 @@ def get_exp_struct(bird, sess, sort=None, location_dict: dict = dict()):
 
     return exp_struct
 
+
 def get_rig_par(exp_struct: dict) -> dict:
     rig_par_file = exp_struct['files']['rig']
     with open(rig_par_file, 'r') as fp:
         rig_par = json.load(fp)
     return rig_par
 
-def get_probe_port(exp_struct:dict, selected_probe:str) -> str:
+
+def get_probe_port(exp_struct: dict, selected_probe: str) -> str:
     # get the probe and the port where the probe was connected
     rig_par = get_rig_par(exp_struct)
     probe_port = rig_par['chan']['port'][selected_probe].strip('-')
@@ -166,4 +172,3 @@ def msort_cleanup(exp_struct: dict):
         os.remove(mda_raw_path)
     except FileNotFoundError:
         logger.debug('Nuttin done, file wasnt there')
-    

@@ -1,4 +1,10 @@
+% master.m template (or master.m with replaced fields) for Kilosort (version 1)
+% see https://github.com/MouseLand/Kilosort2
+% fields with brackets should be replaced by the make_kilo_scripts function in pipefinch.neural.sort.kilo.core
+
+% careful, kilosort2 doesn't work withouth GPU
 useGPU = ${use_gpu}; % do you have a GPU? Kilosorting 1000sec of 32chan simulated data takes 55 seconds on gtx 1080 + M2 SSD.
+
 
 % add to path the kilo_dir and npymat_dir
 addpath(genpath('${kilo_dir}'))

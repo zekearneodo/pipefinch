@@ -6,7 +6,7 @@ import pandas as pd
 import tempfile
 import shutil
 import contextlib
-
+import warnings
 
 from numpy.lib import recfunctions as rf
 from numba import jit
@@ -22,6 +22,15 @@ from tqdm import tqdm_notebook as tqdm
 
 logger = logging.getLogger('pipefinch.h5tools.kwik.kwdfunctions')
 
+int64_limit = 9223372036854775807 #maximum index allowed when slicing arrays
+
+def int_convert(x: np.ndarray, limit=int64_limit) -> np.ndarray:
+    # indices might be 'uint64'. That is troublesome when slicing.
+    # need to convert to 'int64'. But first check whether values are going to be screwed up
+    if np.any(x >= limit):
+        # there is trouble. Get rid of those indices and raise a warining
+        warnings.warn('Some indices exceed the int64 limit. They will be ignored', UserWarning, stacklevel=2)
+    return x[x < limit].astype(np.int, copy=False)
 
 @jit
 def get_slice_array(dset: np.ndarray, starts: np.ndarray, span: np.int, chan_list) -> np.ndarray:
@@ -29,6 +38,8 @@ def get_slice_array(dset: np.ndarray, starts: np.ndarray, span: np.int, chan_lis
     #n_chan = dset.shape[1]
     n_chan = chan_list.size
     slices_array = np.zeros([n_slices, span, n_chan])
+    #logger.info('slices array {}'.format(slices_array.shape))
+
     for i, start in enumerate(starts):
         slices_array[i, :, :] = dset[start: start+span, chan_list]
     return slices_array
@@ -41,8 +52,11 @@ def collect_frames_fast(kwd_file, recs_list, starts, span, chan_list):
         starts_from_rec = starts[recs_list == rec]
         dset = get_data_set(kwd_file, rec)
         n_samples = dset.shape[0]
+        #logger.info('starts_from_rec {}'.format(starts_from_rec.dtype))
+        starts_from_rec = int_convert(starts_from_rec, limit=int64_limit - span)
         valid_starts = starts_from_rec[(starts_from_rec > 0)
                                        & (starts_from_rec + span < n_samples)]
+        logger.info('valid starts {}'.format(valid_starts))
         if valid_starts.size < starts_from_rec.size:
             logger.warn('Some frames were out of bounds and will be discarded')
             logger.warn('will collect only {0} events...'.format(
@@ -339,12 +353,16 @@ def check_continuity(meta_pd: dict, chan_idx_list=np.empty(0), rec_list=np.empty
 @h5_decorator(default_mode='r')
 def kwd_to_binary(kwd_file, out_file_path, chan_list: np.ndarray = np.empty(0),
                   rec_list: np.ndarray = np.empty(0),
-                  chunk_size=8000000, header='bin'):
+                  chunk_size=8000000, header='bin',
+                  hi_pass=None,
+                  car=False):
     """
     :param kwd_file: kwd file or kwd file path
     :param out_file_path: path to the bin file that will be created
     :param chan_list: list of channels. Default (empty) will do the whole table
     :param chunk_size: size in samples of the chunk
+    :param hi_pass: whether to apply a hi_pass filter (None or pass-frequency in Hz)
+    :param car: whether to run a common average referencing (good for dense probes i.e Neuropix)
     :return:
     """
     # header: 'bin' for flat binary, 'mda' for mountainsort
@@ -396,7 +414,9 @@ def kwd_to_binary(kwd_file, out_file_path, chan_list: np.ndarray = np.empty(0),
                                            out_file,
                                            chan_list=chan_numbers.tolist(),
                                            chunk_size=chunk_size,
-                                           header=header
+                                           header=header,
+                                           hi_pass=hi_pass,
+                                           car=car
                                            )
             elements_in += rec_elem
 

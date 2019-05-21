@@ -1,6 +1,8 @@
 import logging
 import numpy as np
 import h5py
+from scipy import signal
+from numba import jit
 
 from pipefinch.h5tools.core.h5tools import append_atrributes
 # methods to create, append, and i/o into tables (dset objecst of h5py)
@@ -138,12 +140,15 @@ def load_table_slice(table, row_list=None, col_list=None):
 
 
 # passing stuff to binary
-def dset_to_binary_file(data_set, out_file, chan_list=None, chunk_size=8000000, header='bin'):
+def dset_to_binary_file(data_set, out_file, chan_list=None, chunk_size=8000000, header='bin',
+                        hi_pass=None, car=False):
     """
     :param data_set: a table from an h5 file to write to a binary. has to be daughter of a rec
     :param out_file: binary file - has to be open in 'wb' mode.
     :param chan_list: list of channels (must be list or tuple). Default (None) will do the whole table
     :param chunk_size: size in samples of the chunk
+    :param hi_pass: whether to apply a hi_pass filter (None or pass-frequency in Hz)
+    :param car: whether to run a common average referencing (good for dense probes i.e Neuropix)
     :return:
     """
     samples_data = data_set.shape[0]
@@ -172,6 +177,19 @@ def dset_to_binary_file(data_set, out_file, chan_list=None, chunk_size=8000000, 
                                                            np.arange(
                                                                start, end),
                                                            chan_list)
+        # apply filter or car before storing
+        if car:
+            apply_car(chunk_buffer[0: end - start, :], axis=0)
+        if hi_pass is not None:
+            # get the samping frequency
+            dset_group = data_set.parent
+            s_f = int(float(dset_group.attrs.get('sample_rate')))
+            logger.debug('chunk s_f {}'.format(s_f))
+            chunk_buffer[0: end - start, :] = apply_hi_pass(chunk_buffer[0: end - start, :],
+                                                            hi_pass,
+                                                            s_f,
+                                                            axis=0)
+
         stored += (chunk_buffer[0: end - start, :]).size
         #logger.info('Chunk buffer dtype {}'.format(chunk_buffer.dtype))
         #logger.info('Chunk dtype dtype {}'.format(data_type))
@@ -198,3 +216,18 @@ def merge_tables(source_file_path, dest_file_path, table_path, chunk_size=800000
         append_table(source[table_path], dest[table_path],
                      chunk_size=chunk_size)
         dest.flush()
+
+
+@jit(nopython=True, cache=True)
+def apply_car(x, axis=0):
+    raise NotImplementedError
+
+# @jit(cache=True)
+# def apply_hi_pass(x, hi_pass, s_f, axis=0):
+#     b, a = signal.butter(6, hi_pass, 'hp', fs=s_f)
+#     return signal.filtfilt(b, a, x, axis=0)
+
+@jit(cache=True)
+def apply_hi_pass(x, hi_pass, s_f, axis=0):
+    sos = signal.butter(10, hi_pass, 'hp', fs=s_f, output='sos')
+    return signal.sosfiltfilt(sos, x, axis=0)

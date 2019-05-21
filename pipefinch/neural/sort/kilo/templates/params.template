@@ -1,0 +1,37 @@
+experiment_name = '${exp}'
+prb_file = '${probe}.prb'
+
+traces = {
+    'raw_data_files': experiment_name + '.raw.kwd',
+    'nbits': 16,
+    'sample_rate': ${fs},
+    'nchannels': ${nchan},
+}
+
+spikedetekt = dict(
+    filter_low=500.,  # Low pass frequency (Hz)
+    filter_high_factor=0.95 * .5,
+    filter_butter_order=3,  # Order of Butterworth filter.
+
+    filter_lfp_low=0,  # LFP filter low-pass frequency
+    filter_lfp_high=300,  # LFP filter high-pass frequency
+
+    chunk_size_seconds=1,
+    chunk_overlap_seconds=.015,
+
+    n_excerpts=50,
+    excerpt_size_seconds=1,
+    threshold_strong_std_factor=${upper_thresh},
+    threshold_weak_std_factor=${lower_thresh},
+    detect_spikes='negative',
+
+    connected_component_join_size=1,
+
+    extract_s_before=${prespike},
+    extract_s_after=${postspike},
+
+    n_features_per_channel=3,  # Number of features per channel.
+    pca_n_waveforms_max=10000,
+)
+
+klustakwik2 = {}

@@ -313,6 +313,98 @@ class MdaKwikWriter(KwikFileWriter):
                                       {'tags': tags_list_utf8})
 
 
+class KiloKwikWriter(KwikFileWriter):
+    mda_params = dict()
+    # init the KwikFile class
+
+    def __init__(self, file_names, chan_group=0, rec_in_binary=np.empty(0)):
+        super(KiloKwikWriter, self).__init__(file_names, chan_group=chan_group,
+                                             rec_in_binary=rec_in_binary)
+
+    def load_grp_file(self):
+        # look for the first ['grp'] file that exists
+        # fist check the 'grp' (user defined), otherwise try the 'grp_kilo'
+        if os.path.exists(self.file_names['grp']):
+            grp_file_path = self.file_names['grp']
+        else:
+            grp_file_path = self.file_names['grp_kilo']
+
+        #module_logger.info('look for cluster tags file in {}'.format(grp_file_path))
+        if os.path.exists(grp_file_path):
+            module_logger.info('found cluster tags file in {}'.format(grp_file_path))
+            return np.loadtxt(grp_file_path,
+                              dtype={'names': ('cluster_id', 'group'),
+                                     'formats': ('i2', 'S8')},
+                              skiprows=1)
+        else:
+            module_logger.info('No cluster file tags found. Assume all clu are unsorted')
+            return np.empty(0)
+
+    def get_clusters(self):
+        # get the clusters from the spike_clusters.npy (if there was manual sorting)
+        # or the spike_templates.npy (if there wasn't)
+        if self.file_names['clu']:
+            self.clu = np.squeeze(np.load(self.file_names['clu']))
+        elif self.file_names['temp']:
+            self.clu = np.squeeze(np.load(self.file_names['temp']))
+        else:
+            raise IOError(
+                'both spike_clusters.npy and spike_templates.npy weren\'t found')
+
+        # get the spike times from the spike_times.npy file
+        self.spk = np.load(self.file_names['spk'])
+
+        # all clusters are 'unsorted' by default.
+        # they get their label (if any) in self.make_clu_groups()
+        self.grp = [(i, 'unsorted') for i in np.unique(self.clu)]
+
+    def make_clu_groups(self, name='main'):
+        clu_grp_dict = {'mua': 1,
+                        'noise': 0,
+                        'unsorted': 3,
+                        'accepted': 2,
+                        'rejected': 9,
+                        'artifact': 5
+                        }
+        clu_translate = {'noise': 'noise',
+                         'good': 'accepted',
+                         'mua': 'mua'}
+
+        # by default, everything is unsorted.
+        # if there is a description 'grp' file, look the described and change their label
+        sorted_grp = self.load_grp_file()
+
+        with h5py.File(self.file_names['kwik'], 'r+') as kwf:
+            chan_group = kwf['/channel_groups'].require_group(
+                '{}'.format(self.chan_group))
+            clusters_group = chan_group.require_group('clusters')
+            desc_group = clusters_group.require_group(name)
+
+            for clu in self.grp:
+                #clu_type = [x[1] for x in self.grp if x[0] == metric['label']]
+                #module_logger.info('metrics {}'.format(metric['metrics']))
+                # if there are tags in the json file, use them
+                # otherwise default is 'unsorted'
+                clu_id, clu_type = clu
+                try:
+                    clu_type = sorted_grp[sorted_grp['cluster_id'] == clu_id]['group'].astype(str)[
+                        0]
+                    clu_type = clu_translate[clu_type]
+                except IndexError:
+                    pass
+
+                attribs = [{'name': 'cluster_group',
+                            'data': clu_grp_dict[clu_type],
+                            'dtype': np.int64}]
+
+                this_cluster_group = insert_group(desc_group,
+                                                  str(clu_id), attribs)
+                #h5t.append_atrributes(this_cluster_group, metric['metrics'])
+                tags_list_utf8 = [h5t.h5_unicode_hack(clu_type)]
+                h5t.append_atrributes(this_cluster_group,
+                                      {'tags': tags_list_utf8})
+
+
 def make_shank_kwd(raw_file, out_file_path, chan_list):
     raise NotImplementedError
     # ss_file = h5py.File(out_file_path, 'w')
@@ -366,3 +458,66 @@ def mda_to_kwik(kwd_path: str, kwik_path: str, mda_firings_path: str, metrics_pa
     kwik_file_writer.make_rec_groups()
     kwik_file_writer.make_clu_groups()
     return kwik_file_writer
+
+
+def kilo_to_kwik(kwd_path: str, kwik_path: str, kilo_folder: str,
+                 realign_to_recordings: bool = True,
+                 rec_in_binary: np.ndarray = np.empty(0),
+                 chan_group=0,
+                 kilo_file_names=None):
+
+    module_logger.info('Creating kwik file {} from kilosort folder {}'.format(
+        kwik_path, kilo_folder))
+    os.makedirs(os.path.split(kwik_path)[0], exist_ok=True)
+    
+    if kilo_file_names is None:
+        # see explanations of kilo output files in
+        # https://github.com/kwikteam/phy-contrib/blob/master/docs/template-gui.md
+        kilo_file_names = dict(
+
+            clu='spike_clusters.npy',
+            spk='spike_times.npy',
+            grp='cluster_group.tsv', # manually curated cluster tags
+            grp_kilo='cluster_KSLabel.tsv', # default kilo cluster tags
+            par='params.py',
+            temp='spike_templates.npy')
+
+    file_paths = {k: os.path.join(kilo_folder, v)
+                  for k, v in kilo_file_names.items()}
+
+    file_paths.update(dict(kwd=kwd_path,kwik=kwik_path))
+
+    # Check whether there is manual sort or not:
+    if not os.path.isfile(file_paths['clu']):
+        module_logger.info(
+            'Clu not found, will assume no manual sorting was done. It may fail')
+        file_paths['clu'] = None
+        file_paths['grp'] = None
+        module_logger.debug(file_paths)
+    else:
+        module_logger.info(
+            'Found clu file, will attempt to unpack manual sorted data from kilosort')
+        file_paths['temp'] = None
+        module_logger.debug(file_paths)
+
+    k = KiloKwikWriter(file_paths, rec_in_binary=rec_in_binary, chan_group=chan_group)
+    k.get_clusters()
+    module_logger.info('Making spike tables')
+    k.make_spk_tables(realign_to_recordings=True)
+    module_logger.info('Making rec tables (make_rec_groups)')
+    k.make_rec_groups()
+    module_logger.info('Making cluster group tables')
+    k.make_clu_groups()
+
+    # module_logger.info('Moving files to their sort folder')
+    # sort_kilo_dir = os.path.join(fn['folders'][location],
+    #                              'kilo_{:02d}'.format(chan_group))
+    # et.mkdir_p(sort_kilo_dir)
+    # py_files = glob.glob(os.path.join(fn['folders'][location], '*.py'))
+    # npy_files = glob.glob(os.path.join(fn['folders'][location], '*.npy'))
+    # for src in py_files + npy_files:
+    #     shutil.move(src, sort_kilo_dir)
+    # module_logger.info('Removing temporary .dat file')
+    # dat_file = os.path.join(fn['folders'][location], 'experiment.dat')
+    # os.remove(dat_file)
+    module_logger.info('Done')

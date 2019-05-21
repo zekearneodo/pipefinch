@@ -16,7 +16,8 @@ from pipefinch.h5tools.core import h5tools as h5t
 
 
 logger = logging.getLogger('pipefinch.neural.units')
-
+# from importlib import reload
+# reload(kwdf)
 
 @jit(nopython=True)
 def offset_timestamps(t, r, rec_offset):
@@ -382,6 +383,12 @@ def get_all_unit_waveforms(kwik_path, kwd_path, port='A', before=20, after=20,
 
     logger.info('About to get all waveforms for {} units in file {}'.format(
         units_list.shape[0], kwik_path))
+
+    # For debugging without the Parallel
+    # return Unit(
+    #     clu_list[0], kwik_path, kwd_path, port=port).get_unit_spikes(before=before,
+    #                                                        after=after,
+    #                                                        max_events=max_events)
 
     def waveform_get(u): return Unit(
         u, kwik_path, kwd_path, port=port).get_unit_spikes(before=before,

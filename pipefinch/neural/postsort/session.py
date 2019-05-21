@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy import signal
 from matplotlib import pyplot as plt
+import traceback
 
 from pipefinch.h5tools.kwik import kutil
 from pipefinch.h5tools.kwik import kwdfunctions as kwdf
@@ -17,7 +18,7 @@ from pipefinch.neural import basic_plot as bp
 
 from pipefinch.util import spectral as sp
 
-logger = logging.getLogger('pipefinch.neural.postsort')
+logger = logging.getLogger('pipefinch.neural.postsort.session')
 
 # A session contains all the metadata of the session, pointers to the relevant files,
 # un and events to plot event-aligned rasters and clusters info
@@ -326,12 +327,19 @@ def plot_all_units(sess, only_tags=['accepted', 'mua', 'unsorted'], example_even
                          port=sess.probe_port)
         unit_tags = a_unit.get_attrs()['tags']
         # if it is a rejected one don't even care
+        sort_ver_string = ''
+        try:
+            sort_ver_string = '{}'.format(sess_par['sort'])
+        except:
+            sort_ver_string = 'n'
+
         if (not 'rejected' in unit_tags) and any([x in unit_tags for x in only_tags]):
             try:
                 fig = plot_unit(sess, clu, example_event_id=example_event_idx)
-                fig_file = '{}_unit_{}_{:03d}.png'.format(unit_tags[0], clu)
+                fig_file = '{}_unit_{}_{:03d}.png'.format(unit_tags[0], sort_ver_string, clu)
                 fig.savefig(os.path.join(rasters_path, fig_file),
                             bbox_inches='tight')
-            except:
-                logger.warn('Failed to plot clu {}'.format(clu))
+            except Exception as err:
+                logger.warn('Failed to plot clu {}, error {}'.format(clu, err))
+                traceback.print_exc()
                 continue
