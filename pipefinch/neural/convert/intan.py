@@ -3,15 +3,12 @@ import logging
 import glob
 import os
 
-
-
 #from intan2kwik.core.h5 import tables
 from pipefinch.neural.convert.mdautil import update_mda_hdr, write_mda_hdr, mda_fun_dict
 from intan2kwik.core import reading
-import intan2kwik.kwd as ikwd
+from intan2kwik import kwd as ikwd
 
 logger = logging.getLogger('pipefinch.neural.convert')
-
 
 
 def intan_to_mda(all_rhx_files: list, dest_file_path: str, dtype: str=np.int16) -> tuple:
@@ -98,7 +95,6 @@ def rhd_rec_to_dict(rhx_file_path: list, chan_groups_wishlist: list=['amplifier'
 
     return block_data, block_t
 
-
 def intan_to_bin(all_rhx_files:list, dest_file_path: str, \
                  include_channels: list=['amplifier'], \
                  board: str='auto', \
@@ -163,7 +159,6 @@ def intan_to_bin(all_rhx_files:list, dest_file_path: str, \
             update_mda_hdr(hdr, out_file)
     
     return first_header, samples_in
-
 
 def folder_to_files(folder: str, board: str='auto') -> str:
     """
