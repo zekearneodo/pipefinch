@@ -218,7 +218,7 @@ def do_the_sort(bird, sess):
 
     # pause the module logger and log to a different thing.
     mod_logger.disabled = True
-    sorter = subprocess.check_output(['matlab', '-nodesktop', '-nosplash', '-noawt', mlb_cmd, log_cmd])
+    sorter = subprocess.check_output(['matlab', '-nodesktop', '-nosplash', '-nojvm', mlb_cmd, log_cmd])
     mod_logger.disabled = False
     return sorter
 
