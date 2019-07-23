@@ -175,8 +175,9 @@ def make_kilo_scripts(local_sort_dir, user_kilo_pars: dict = {}, user_kilo_paths
 def make_kilo_chanmap(prb_dict: dict, chan_map_path: str) -> dict:
     # see https://github.com/cortex-lab/KiloSort
     # count the total number of channels
+    logger.info('making kilo chanmap')
     n_channels = len(probes.flatten_probe(prb_dict).keys())
-
+    logger.info('{} chans (ports) recorded')
     # make all the chanMap arrays for kilosort
     # all channels are 'connected' or 'active' (filter happens in prb_dict)
     connected = np.array([True] * n_channels).reshape((n_channels, 1))
@@ -189,9 +190,10 @@ def make_kilo_chanmap(prb_dict: dict, chan_map_path: str) -> dict:
     k_coords = np.ones((n_channels, 1)) * -1
 
     for i_group, (grp_name, grp_dict) in enumerate(prb_dict.items()):
-        for channel, coord_tuple in grp_dict.items():
-            x_coords[channel], y_coords[channel] = coord_tuple
-            k_coords[channel] = i_group + 1
+        for channel, (port, coord_tuple) in enumerate(grp_dict.items()):
+            mlab_channel = channel
+            x_coords[mlab_channel], y_coords[mlab_channel] = coord_tuple
+            k_coords[mlab_channel] = i_group + 1
 
     chan_map_dict = {'name': 'pipefinch.neural.kilo.core.make_kilo_chanmap',
                      'Nchannels': n_channels,

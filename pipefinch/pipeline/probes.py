@@ -1,5 +1,10 @@
+import logging
 import numpy as np
 from typing import Union
+
+
+logger = logging.getLogger('pipefinch.pipeline.probes')
+
 # probe_site maps
 # each probe is a dict {site: coord}, where site is an int, coord is a 2/3 tuple (x, y, z)
 # as in the probe_maping
@@ -190,17 +195,16 @@ def flatten_probe(prb_dict: dict) -> dict:
     flat_probe = {k: v for group in prb_dict.values() for k, v in group.items()}
     return flat_probe
 
-def make_map(probe_name: str, chan_list, headstage_name: str='intan32-h32', 
+def make_map(probe_name: str, chan_list, headstage_name: str, 
     return_dict: bool=False) -> Union[dict, np.array]:
     """[summary]
     Make a chan: (x, y) coordinate map, taking into account the probe, the headstage, and the
     list of channels used.
     Arguments:
         probe_name {str} -- name of the probe (to lookup the probe from the probe definitions dictionary in probes.py)
-        chan_list {[type]} -- list of channels of the probe present in the recordings
+        chan_list {[type]} -- list of channels (ports) recorded
     Keyword Arguments:
         headstage_name {str} -- name of the headstage (to lookup the headstage from the hs definitions dictionary in probes.py)
-     (default: {'intan32-h32'})
         return_dict {bool} -- whether to return the whole dictionary or just the ordered coordintates (mountainsort style) (default: {False})
     
     Returns:
@@ -221,6 +225,7 @@ def make_map(probe_name: str, chan_list, headstage_name: str='intan32-h32',
     # headstage is {port: site}, probe is {site: coords}
     a_headstage = headstage[headstage_name]
     a_probe = probe[probe_name]
+    logger.info('Making maps for {} probe on {} headstage'.format(probe_name, headstage_name))
 
     port_coords_dict = {}
     for grp_name, grp_dict in a_probe.items():
