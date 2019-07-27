@@ -2,7 +2,6 @@ import logging
 import numpy as np
 from typing import Union
 
-
 logger = logging.getLogger('pipefinch.pipeline.probes')
 
 # probe_site maps

@@ -15,9 +15,15 @@ locations_dict['zpikezorter'] = {'mnt': os.path.abspath('/mnt/microdrive/birds')
 
 locations_dict['ZOROASTRO'] = {'mnt': os.path.abspath('B:\microdrive\data'),
                                'local': os.path.abspath('D:\microdrive')}
+
 locations_dict['lookfar'] = {'mnt': os.path.abspath('/Volumes/Samsung_X5/microdrive'),
                              'local': os.path.abspath('/Volumes/Samsung_X5/microdrive'),
                              'fast': os.path.abspath('/Volumes/Samsung_X5/scratch')
+                             }
+
+locations_dict['lookfar'] = {'mnt': os.path.abspath('/Users/zeke/experiment/birds'),
+                             'local': os.path.abspath('/Users/zeke/experiment/birds'),
+                             'fast': os.path.abspath('/Users/zeke/experiment/scratch')
                              }
 # Zinch in windows
 locations_dict['Zinch'] = {'mnt': '\\\\ZUPERFINCHJR\storage\Data',
@@ -163,6 +169,9 @@ def get_probe_port(exp_struct: dict, selected_probe: str) -> str:
     probe_port = rig_par['chan']['port'][selected_probe].strip('-')
     return probe_port
 
+def list_sessions(bird: str, location_dict: dict = dict(), section='raw') -> list:
+    exp_struct = get_exp_struct(bird, '', location_dict=location_dict)
+    return next(os.walk(exp_struct['folders'][section]))[1]
 
 def msort_cleanup(exp_struct: dict):
     # remove the mda files

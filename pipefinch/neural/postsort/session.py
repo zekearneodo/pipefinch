@@ -24,7 +24,7 @@ logger = logging.getLogger('pipefinch.neural.postsort.session')
 # un and events to plot event-aligned rasters and clusters info
 
 
-class Session:
+class SessionSuper:
     exp_struct = dict()  # experiment file structure
     sess_par = dict()  # session parameters (bird, rec session)
     viz_par = dict()  # visualization parameters
@@ -34,7 +34,7 @@ class Session:
     unit = tuple()  # tuple with the unit
     sorted_recs = np.empty(0)
     events = {}
-    pd_meta = pd.DataFrame()
+
     units_meta_pd = pd.DataFrame()
 
     # quick access
@@ -56,25 +56,15 @@ class Session:
             sort_version = sess_par['sort']
         except:
             sess_par['sort'] = None
-        exp_struct = et.get_exp_struct(
-            sess_par['bird'], sess_par['sess'], sess_par['sort'])
-        self.exp_struct = exp_struct
+
         self.kwd_path = exp_struct['files']['kwd']
         self.kwik_path = exp_struct['files']['kwik']
         self.kwe_path = exp_struct['files']['kwe']
 
-        # all the metadata in the kwik file (not filtered to the sorted part)
-        self.pd_meta = kwdf.get_all_rec_meta(exp_struct['files']['kwd'])
-        # the list of recs that are sorted (as per the kwik file)
-        self.sorted_recs = kwdf.get_rec_list(exp_struct['files']['kwik'])
-        # handy metadata on how the data was recorded
-        self.s_f = kutil.get_record_sampling_frequency(
-            exp_struct['files']['kwd'])
-        self.probe_port = et.get_probe_port(exp_struct, sess_par['probe'])
+        # set visualization parameters
+        self.reset_viz_par()
 
-        # get all the units meta
-        self.get_units_meta()
-
+        self.probe_port = et.get_probe_port(self.exp_struct, sess_par['probe'])
         # load the rig parameters
         self.load_rig_par()
 
@@ -138,33 +128,6 @@ class Session:
     def get_mic_stream(self):
         return self.mic_streams
 
-    def get_perievent_stream_frames(self, signal_name, filter_recs=np.empty(0)) -> np.ndarray:
-        ch_type, ch_name = rigutil.lookup_signal(self.rig_par, signal_name)
-        wanted_chans = np.array([ch_name])
-        sel_chan_names = kwdf.get_all_chan_names(
-            self.pd_meta, chan_filt=wanted_chans)
-
-        all_rec, all_start = self.get_event_stamps(filter_recs=filter_recs)
-
-        vp = self.viz_par
-        stream_pst_array = kwdf.get_frames(self.kwd_path,
-                                           all_start + vp['pre_samples'],
-                                           all_rec, vp['span'],
-                                           sel_chan_names,
-                                           self.pd_meta)
-        # that is a [n_evt, n_samples, n_ch] array
-        return stream_pst_array
-
-    def get_perievent_neural_traces(self, unit: un.Unit):
-        # get all the ephys channels for the probe around the event
-        all_ch_array = self.get_perievent_stream_frames(unit.neural_port,
-                                                        filter_recs=self.sorted_recs)
-        # filter the main channels of the unit
-        # get the unit main channels
-        unit_main_chans = unit.get_unit_main_chans()[1]
-        #logger.info('unit main chans {}'.format(unit_main_chans))
-        return all_ch_array[:, :, unit_main_chans]
-
     def get_unit(self, clu: int, group: int = 0) -> un.Unit:
         # create a unit object with the kwd, kwik files and a clu number
         return un.Unit(clu, self.kwik_path, self.kwik_path,
@@ -195,6 +158,55 @@ class Session:
         if self.units_meta_pd.size == 0:
             self.get_units_meta()
         return np.unique(np.concatenate(self.units_meta_pd['tags'].values).flatten())
+
+
+class Session(SessionSuper):
+    pd_meta = pd.DataFrame()
+
+    def __init__(self, sess_par, viz_par):
+        exp_struct = et.get_exp_struct(sess_par['bird'],
+                                       sess_par['sess'],
+                                       sess_par['sort'])
+        self.exp_struct = exp_struct
+        super().__init__(self, sess_par, viz_par)
+
+        # all the metadata in the kwik file (not filtered to the sorted part)
+        self.pd_meta = kwdf.get_all_rec_meta(self.exp_struct['files']['kwd'])
+        # the list of recs that are sorted (as per the kwik file)
+        self.sorted_recs = kwdf.get_rec_list(self.exp_struct['files']['kwik'])
+        # handy metadata on how the data was recorded
+        self.s_f = kutil.get_record_sampling_frequency(
+            self.exp_struct['files']['kwd'])
+        # get all the units meta
+        self.get_units_meta()
+
+
+    def get_perievent_stream_frames(self, signal_name, filter_recs=np.empty(0)) -> np.ndarray:
+        ch_type, ch_name = rigutil.lookup_signal(self.rig_par, signal_name)
+        wanted_chans = np.array([ch_name])
+        sel_chan_names = kwdf.get_all_chan_names(
+            self.pd_meta, chan_filt=wanted_chans)
+
+        all_rec, all_start = self.get_event_stamps(filter_recs=filter_recs)
+
+        vp = self.viz_par
+        stream_pst_array = kwdf.get_frames(self.kwd_path,
+                                           all_start + vp['pre_samples'],
+                                           all_rec, vp['span'],
+                                           sel_chan_names,
+                                           self.pd_meta)
+        # that is a [n_evt, n_samples, n_ch] array
+        return stream_pst_array
+
+    def get_perievent_neural_traces(self, unit: un.Unit):
+        # get all the ephys channels for the probe around the event
+        all_ch_array = self.get_perievent_stream_frames(unit.neural_port,
+                                                        filter_recs=self.sorted_recs)
+        # filter the main channels of the unit
+        # get the unit main channels
+        unit_main_chans = unit.get_unit_main_chans()[1]
+        #logger.info('unit main chans {}'.format(unit_main_chans))
+        return all_ch_array[:, :, unit_main_chans]
 
 
 # functions for viewing object of this session
@@ -336,7 +348,8 @@ def plot_all_units(sess, only_tags=['accepted', 'mua', 'unsorted'], example_even
         if (not 'rejected' in unit_tags) and any([x in unit_tags for x in only_tags]):
             try:
                 fig = plot_unit(sess, clu, example_event_id=example_event_idx)
-                fig_file = '{}_unit_{}_{:03d}.png'.format(unit_tags[0], sort_ver_string, clu)
+                fig_file = '{}_unit_{}_{:03d}.png'.format(
+                    unit_tags[0], sort_ver_string, clu)
                 fig.savefig(os.path.join(rasters_path, fig_file),
                             bbox_inches='tight')
             except Exception as err:
