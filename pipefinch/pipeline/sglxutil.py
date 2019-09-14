@@ -5,6 +5,7 @@
 # and where they are located in the block.
 # More detailed meta here https://github.com/billkarsh/SpikeGLX/blob/master/Markdown/Metadata.md.
 import os
+import sys
 import glob
 import logging
 import configparser
@@ -44,6 +45,26 @@ def sgl_file_struct(sess_folder: str) -> (dict, pd.DataFrame):
 
     return folder_struct, files_pd
 
+def sgl_struct(sess_par: dict, epoch: str) -> dict:
+    # locations of the folders for the epoch
+    exp_struct = et.get_exp_struct(
+        sess_par['bird'], sess_par['sess'])
+    exp_struct['folders'] = {k: os.path.join(v, epoch)
+                  for k, v in exp_struct['folders'].items()}
+
+    update_files = ['kwd', 'kwe', 'mda_raw', 'bin_raw', 'kwik', 'par']
+    updated_files_dict = {k: os.path.join(os.path.split(v)[0],
+                                          epoch,
+                                          os.path.split(v)[-1]) for k, v in exp_struct['files'].items() if k in update_files}
+    
+    exp_struct['files'].update(updated_files_dict)
+    exp_struct['files']['kwik'] = os.path.join(os.path.split(exp_struct['files']['kwik'])[0],
+                                               'sort_{}'.format(sess_par['sort']),
+                                               os.path.split(exp_struct['files']['kwik'])[-1])
+    
+    #logger.info(updated_files_dict)
+    
+    return exp_struct
 
 def get_data_meta_path(either_file_path: str) -> tuple:
     """get either a meta o rr binary file path and return both as a tuple
@@ -92,9 +113,10 @@ def get_imec_meta(meta_file_path: str) -> dict:
 
 def get_nidq_meta(meta_file_path: str) -> dict:
     # get a dictionary with usually wanted metadata value: pairs
+    logger.info('meta file {}'.format(meta_file_path))
     config = read_headless_config(meta_file_path, dummy_sec_name='r')
     full_meta = dict(config['r'])  # read the full meta
-
+    
     usual_meta = {'nsavedchans': int(config['r']['nSavedChans']),
                   's_f': float(config['r']['niSampRate']),
                   # n chans in multiplex neural, multiplex analog, direct analog, digital:
@@ -261,7 +283,7 @@ def create_nidq_grp(rec_grp, nidq_dict: dict, rec: int, include_channels: np.arr
     bit_volt = (int(ni_meta['niairangemax']) -
                 int(ni_meta['niairangemin']))/32768
 
-    all_chan_names = ['{}-{}'.format(block, i) for i in include_channels]
+    all_chan_names = ['{}-{:02d}'.format(block, i) for i in include_channels]
     all_chan_names_uni = [h5_unicode_hack(x) for x in all_chan_names]
     n_chan = len(all_chan_names)
     all_bit_volts = np.ones(n_chan) * bit_volt
@@ -383,23 +405,29 @@ def all_sgl_to_kwd(sess_par: dict, include_blocks=['adc', 'dig_in'], overwrite=F
     raw_folder = exp_struct['folders']['raw']
 
     logger.info(
-        'will process to kwd all epochs in session folder {}'.format(raw_folder))
+        'will process to kwd all epochs in session folder skipping trouble sessions {}'.format(raw_folder))
     logger.info('found {} epoch subfolders'.format(len(all_sess_folders)))
+    trouble_sessions = []
     for sess_folder in all_sess_folders:
         logger.info('epoch folder {}'.format(sess_folder))
-        sgl_folder, sgl_pd = sgl_file_struct(sess_folder)
-        nidq_meta_files = glob.glob(os.path.join(sgl_folder['nidq'], '*.meta'))
-        nidq_meta_file = nidq_meta_files[0]
+        try:
+            sgl_folder, sgl_pd = sgl_file_struct(sess_folder)
+            nidq_meta_files = glob.glob(os.path.join(sgl_folder['nidq'], '*.meta'))
+            nidq_meta_file = nidq_meta_files[0]
 
-        #dest_file_name = os.path.split(nidq_meta_file)[-1].split('.nidq.meta')[0] + '.kwd.nidq'
-        dest_file_name = 'streams.kwd'
-        dest_file_path = os.path.join(kwik_folder, os.path.split(
-            sgl_folder['nidq'])[-1], dest_file_name)
-
-        nidq_dict = sgl_to_kwd(nidq_meta_file, dest_file_path,
+            #dest_file_name = os.path.split(nidq_meta_file)[-1].split('.nidq.meta')[0] + '.kwd.nidq'
+            dest_file_name = 'stream.kwd'
+            dest_file_path = os.path.join(kwik_folder, os.path.split(
+                sgl_folder['nidq'])[-1], dest_file_name)
+       
+            nidq_dict = sgl_to_kwd(nidq_meta_file, dest_file_path,
                                rec=0, include_blocks=include_blocks, overwrite=True)
+        except:
+            logger.info("Unexpected error:", sys.exc_info()[0])
+            trouble_sessions.append(sess_folder)
 
     logger.info('Done with all')
+    return trouble_sessions
 
 
 def list_sgl_epochs(sess_par: dict, raw_paths=False) -> list:
@@ -418,18 +446,9 @@ def list_sgl_epochs(sess_par: dict, raw_paths=False) -> list:
         return list(map(lambda x: os.path.split(x)[-1], all_sess_folders))
 
 
-def sgl_struct(sess_par: dict, epoch: str) -> dict:
-    # locations of the folders for the epoch
-    exp_struct = et.get_exp_struct(
-        sess_par['bird'], sess_par['sess'], sess_par['sort'])
-    exp_struct['folders'] = {k: os.path.join(v, epoch)
-                  for k, v in exp_struct['folders'].items()}
+def concat_epochs(sess_par: dict, epoch_names: list) -> str:
+    # merges two epocs into a single binary file
+    pass
 
-    update_files = ['kwd', 'kwe', 'mda_raw', 'kilo_raw']
-    updated_files_dict = {k: os.path.join(os.path.split(v)[0],
-                                          epoch,
-                                          os.path.split(v)[-1]) for k, v in exp_struct['files'].items() if k in update_files}
-    
-    logger.info(updated_files_dict)
-    exp_struct['files'].update(updated_files_dict)
-    return exp_struct
+
+

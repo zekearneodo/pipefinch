@@ -6,6 +6,8 @@ import logging
 import os
 import pickle
 import h5py
+import json
+
 from tqdm import tqdm_notebook as tqdm
 from numba import jit
 from joblib import Parallel, delayed
@@ -14,10 +16,13 @@ from pipefinch.h5tools.kwik import kwdfunctions as kwdf
 from pipefinch.h5tools.kwik import kwikfunctions as kwkf
 from pipefinch.h5tools.core import h5tools as h5t
 
+from pipefinch.util import jitarray as jita
+from pipefinch.pipeline import sglxutil as sglu
 
 logger = logging.getLogger('pipefinch.neural.units')
 # from importlib import reload
 # reload(kwdf)
+
 
 @jit(nopython=True)
 def offset_timestamps(t, r, rec_offset):
@@ -62,13 +67,13 @@ class Unit:
 
         self.neural_port = port
 
+        self.get_attrs()
+        self.get_sampling_rate()
+        # self.get_qlt()
         if not kwd_path == '':
-            self.get_sampling_rate()
-            # self.get_qlt()
-            self.get_time_stamps()
             self.get_rec_offsets()
             self.get_unit_chans()
-            self.get_attrs()
+        self.get_time_stamps()
 
     # get time stamps of spiking events (in samples)
 
@@ -103,13 +108,20 @@ class Unit:
         return self.attrs
 
     def get_rec_offsets(self):
-        self.recording_offsets = kwdf.get_rec_starts(self.kwd_path)
+        if self.kwd_path == "":
+            # No kwd path is spikegl; only one recording
+            self.recording_offsets = {0: 0}
+        else:
+            self.recording_offsets = kwdf.get_rec_starts(self.kwd_path)
         return self.recording_offsets
 
     def get_sampling_rate(self):
-        assert (self.kwd_path is not None)
-        self.sampling_rate = kwdf.get_sampling_rate(
-            kwdf.get_all_rec_meta(self.kwd_path), 0)
+        # get the sampling rate from the first rec in the .kwik file.
+        # the sampling_rate should be the sam across all recs anyway.
+        first_rec = kwdf.get_rec_list(self.kwik_path)[0]
+
+        self.sampling_rate = kwkf.get_rec_attrs(self.kwik_path, 0)[
+            'rec_group']['sample_rate']
         return self.sampling_rate
 
     # get the quality of the unit
@@ -212,6 +224,8 @@ class Unit:
         # load parameters
         # logger.warning(
         #     'You are getting channel locations from one rec and using for all, mind that this only works if all recs have the same setting')
+        if self.kwd_path == "":
+            logger.info('No kwd file, no unit chans')
         sess_meta_pd = kwdf.get_all_rec_meta(self.kwd_path)
         wanted_chans = np.array([self.neural_port + '-'])
         chan_names = kwdf.get_all_chan_names(
@@ -342,10 +356,15 @@ class Unit:
         # main_chan_absolute is the actual order of the channel in the array
         return main_chans_idx.astype(np.int), main_chan_absolute
 
-    def get_unit_main_chans_names(self, n_chans=4):
-        main_chans_idx = self.get_unit_main_chans(n_chans=n_chans)
+    def get_unit_main_chans_names(self):
+        #main_chans_idx = self.get_unit_main_chans(n_chans=n_chans)
+        unit_chans = self.get_unit_chans()
+        #logger.info(unit_chans)
+        main_chans_idx = np.array([np.where(x == unit_chans)[
+                                  0] for x in unit_chans]).squeeze()
         unit_chan_names = self.unit_chan_names
-        return unit_chan_names[main_chans_idx[1]]
+        #logger.info(main_chans_idx)
+        return unit_chan_names[main_chans_idx]
 
     def get_unit_main_wave(self, n_chans=4):
         ch = self.get_unit_main_chans(n_chans=n_chans)[0]
@@ -374,6 +393,134 @@ class Unit:
     def get_unit_widths(self):
         widths = self.get_all_unit_widths()
         return np.median(widths), np.std(widths)
+
+
+class SglUnit(Unit):
+    sgl_data_folder = ''
+    imec_meta_path = ''
+    kilo_folder = ''
+
+    def __init__(self, clu: int, kwik_path: str, sgl_data_path: str = '', group=0, port='A'):
+        super().__init__(clu, kwik_path, kwd_path='', group=group, port=port)
+
+    def get_unit_main_chans(self, n_chans=12):
+        kilo_main_chans = self.get_attrs()['main_chan']
+        assert(n_chans <= kilo_main_chans.size)
+        # main_chan_absolute is the actual order of the channel in the array
+        return np.argsort(kilo_main_chans[:n_chans]), kilo_main_chans[:n_chans]
+
+    def get_sess_par(self) -> dict:
+        sort_folder = self.get_folder()
+        path_parts = os.path.normpath(sort_folder).split(os.sep)[::-1]
+        sess_pars = ['sort', 'epoch', 'sess']
+        sess_par = {attr: val for attr, val in zip(sess_pars, path_parts[:3])}
+        sess_par['bird'] = path_parts[-5]
+        return sess_par
+        # self.bird = str(os.path.split(bird_folder)[1])
+        # self.sess = str(sess)
+        # self.id = 'unit_{}_{}_{}_{}'.format(self.bird, self.sess, self.group, self.clu)
+
+    def get_exp_struct(self) -> dict:
+        sess_par = self.get_sess_par()
+        return sglu.sgl_struct(sess_par, sess_par['epoch'])
+
+    def get_unit_chans(self, n_chans=12):
+        # overloaded method to just get the unit chans in the binary file.
+        # the names are just the number in the binary file
+        # n_chans=12, which is the max number kilosort returns
+
+        self.unit_chans = self.get_unit_main_chans(n_chans=n_chans)[1]
+        self.unit_chan_names = np.array(
+            ['{:03d}'.format(c) for c in self.unit_chans])
+        return self.unit_chans
+    
+    def get_max_amp_chans(self, n_chans=12) -> tuple:
+        chan_order, chan = self.get_unit_main_chans(n_chans)
+        main_wave = self.get_unit_main_wave(n_chans=n_chans)
+        main_chan_names = self.get_unit_main_chans_names()
+        
+        avg_wav = main_wave.mean(axis=0)
+        spk_amps = np.ptp(avg_wav, axis=0)
+        sort_ind = np.argsort(spk_amps, axis=0)[::-1]
+        
+        return sort_ind, chan_order[sort_ind], chan[sort_ind], main_chan_names[sort_ind]
+    
+    def get_ksort_paths(self):
+        sort_folder = self.get_folder()
+        ksort_folder = os.path.split(sort_folder)[0]
+
+        sort_paths = {'sort_folder': sort_folder,
+                      'sort_bin_file': os.path.join(ksort_folder, 'raw.bin'),
+                      'sort_pars_file': os.path.join(ksort_folder, 'params.json')}
+        return sort_paths
+
+    def get_sort_pars(self):
+        json_pars_path = self.get_exp_struct()['files']['par']
+        with open(json_pars_path) as jfile:
+            jpar = json.load(jfile)
+        return jpar
+
+    def load_bin_file(self):
+        pass
+
+    def get_raw_file(self) -> np.ndarray:
+        exp_struct = self.get_exp_struct()
+        sort_par = self.get_sort_pars()
+        raw_ap_path = exp_struct['files']['bin_raw']
+        all_raw_arr = np.memmap(raw_ap_path,
+                                dtype=sort_par['dtype_name'],
+                                mode='r').reshape([-1, sort_par['n_chan']])
+        return all_raw_arr
+
+    def get_raw_frames(self, start_samples: np.ndarray, span: int, chans_arr: np.ndarray) -> np.ndarray:
+        all_raw_arr = self.get_raw_file()
+        frames_arr = jita.collect_frames(all_raw_arr,
+                                         start_samples,
+                                         span,
+                                         chans_arr)
+        return frames_arr
+
+    def get_unit_spikes(self, before: int = 20, after: int = 20, max_events=5000) -> np.ndarray:
+        # wavefomrs is an array [n_spikes, n_samples, n_channels]
+        logger.debug('Getting units for clu {} in file {}'.format(
+            self.clu, self.kwik_path))
+        valid_times = self.time_samples[self.time_samples > before]
+        valid_recs = self.recordings[self.time_samples > before]
+
+        if valid_times.size < self.time_samples.size:
+            logger.warn(
+                'Some frames were out of left bounds and will be discarded')
+            logger.warn(
+                'will collect only {0} events...'.format(valid_times.size))
+
+        chan_list = self.get_unit_chans()
+        logger.debug('chanlist {}'.format(chan_list))
+
+        self.waveform_pars = {'before': before,
+                              'after': after,
+                              'chan_list': np.array(chan_list)}
+
+        try:
+            assert valid_times.size > 1, 'no valid events'
+            # get a random sample of max_events elements
+            sample = np.random.choice(np.arange(valid_times.size),
+                                      size=min(max_events, valid_times.size),
+                                      replace=False)
+
+            start_samples = valid_times[sample] - before
+            span = before + after
+            self.all_waveforms = self.get_raw_frames(start_samples,
+                                                     span,
+                                                     np.array(chan_list))
+
+        except (ValueError, AssertionError) as err:
+            logger.warn(
+                'Could not retrieve waveforms for clu {}, error'.format(self.clu, err))
+            self.all_waveforms = np.zeros(
+                [1, before + after, np.array(chan_list).size])
+            self.all_waveforms[:] = np.nan
+        self.save_unit_spikes()
+        return self.waveforms
 
 
 def get_all_unit_waveforms(kwik_path, kwd_path, port='A', before=20, after=20,

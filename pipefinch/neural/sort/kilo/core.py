@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 import subprocess
 import numpy as np
 import scipy.io as sio
@@ -225,4 +226,8 @@ def make_phy_par_file(user_kilo_pars: dict, file_paths: dict) -> dict:
     with open(file_paths['phy_par'], 'w+') as f:
         [f.write('{} = {}\n'.format(k, repr(v))) for k, v in phy_pars.items()]
     logger.info('Written phy parameters file {}'.format(file_paths['phy_par']))
+    # save the params to a json file   
+    with open(file_paths['params'], 'w') as jfile:
+        json.dump(kilo_pars, jfile)
+    logger.info('Written ksort parameters file {}'.format(file_paths['params']))
     return phy_pars

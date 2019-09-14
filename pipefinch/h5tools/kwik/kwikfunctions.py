@@ -91,6 +91,15 @@ def append_atrributes(h5obj, attr_dict_list):
             attr_dict['name'], attr_dict['data'], dtype=attr_dict['dtype'])
         #h5obj.attrs.create(attr['name'], attr['data'], dtype=attr['dtype'])
 
+@h5t.h5_decorator(default_mode='r')
+def get_rec_attrs(kwik_file, rec) -> dict:
+    rec_attrs = dict()
+    # names of metadata groups and locations in the rec group:
+    fields_locs = {'rec_group': '/recordings/{}'.format(rec)}
+
+    for name, location in fields_locs.items():
+        rec_attrs[name] = kwdf.obj_attrs_2_dict_translator(kwik_file[location])
+    return rec_attrs
 
 class KwikFileWriter:
     file_names = dict()
@@ -98,6 +107,8 @@ class KwikFileWriter:
     kwik_path = ''
     chan_group = 0
     rec_sizes = np.empty(0)
+    rec_start_samples = np.empty(0)
+    
     # recs that were included in the sorted binary file
     rec_in_bin = np.empty(0)
 
@@ -105,10 +116,13 @@ class KwikFileWriter:
     clu = np.empty(0)  # clusters id matching spk, 1d array
     grp = tuple()  # tuple of (clu, sorted_descriptor)
 
-    def __init__(self, file_names: dict, chan_group: int = 0, rec_in_binary: np.ndarray = np.empty(0)):
+    def __init__(self, file_names: dict, chan_group: int = 0, 
+                 rec_in_binary: np.ndarray = np.empty(0),
+                 raw_format = 'kwd'):
+        
         self.file_names = file_names
         self.chan_group = chan_group
-        self.kwd_path = file_names['kwd']
+        
         self.kwik_path = file_names['kwik']
         self.rec_kwik = None
         self.spk_kwik = None
@@ -117,8 +131,24 @@ class KwikFileWriter:
         # with open(file_names['par']) as f:
         #     exec (f.read())
         #     self.s_f = sample_rate
-        self.s_f = kutil.get_record_sampling_frequency(self.kwd_path)
-        self.rec_in_bin = rec_in_binary
+        
+        # if data comes from rh, kwik and there is a kwd with neural data
+        if raw_format == 'kwd':
+            self.kwd_path = file_names['kwd']
+            self.s_f = kutil.get_record_sampling_frequency(self.kwd_path)
+            # fill the self.rec_sizes values
+            self.get_rec_sizes_in_bin()
+            self.rec_in_bin = rec_in_binary
+            self.rec_start_samples = kwdf.get_rec_starts(self.file_names['kwd'])
+            
+        # if data comes from spikeGLX
+        elif raw_format == 'sgl':    
+            self.kwd_path = None
+            self.rec_in_bin = np.array([0])
+            self.rec_start_samples = np.array([0])
+            self.rec_sizes = {0: np.iinfo(np.int64).max} # all is rec0
+            self.s_f_from_params()
+            
         self.create_kwf()
 
     def create_kwf(self):
@@ -134,6 +164,12 @@ class KwikFileWriter:
         # self.spk
         raise NotImplementedError
 
+    def s_f_from_params(self):
+        with open(self.file_names['params'], 'r') as jfile:
+            ks_params = json.load(jfile)
+        module_logger.info(ks_params['s_f'])
+        self.s_f = ks_params['s_f']
+        
     def get_rec_sizes_in_bin(self):
         # get the rec sizes
         # filter all the ones who are present in the binary file
@@ -149,12 +185,11 @@ class KwikFileWriter:
         # self.spk
         # self.clu
 
-        # fill the self.rec_sizes values
-        self.get_rec_sizes_in_bin()
         # refer to starts, counting from the first present rec in the binary
         self.rec_kwik, self.spk_kwik = ref_to_rec_starts(self.rec_sizes,
                                                          self.spk)
 
+        module_logger.info(self.s_f)
         with h5py.File(self.kwik_path, 'r+') as kwf:
             chan_group = kwf['/channel_groups'].require_group(
                 '{}'.format(self.chan_group))
@@ -176,7 +211,7 @@ class KwikFileWriter:
 
     def make_rec_groups(self):
         rec_list = np.unique(self.rec_kwik)
-        rec_start_samples = kwdf.get_rec_starts(self.file_names['kwd'])
+        rec_start_samples = self.rec_start_samples
         # module_logger.debug(rec_start_samples)
         #module_logger.info("Found recs {}".format(rec_list))
         with h5py.File(self.file_names['kwik'], 'r+') as kwf:
@@ -260,7 +295,8 @@ class MdaKwikWriter(KwikFileWriter):
 
     def __init__(self, file_names, chan_group=0, rec_in_binary=np.empty(0)):
         super(MdaKwikWriter, self).__init__(file_names, chan_group=chan_group,
-                                            rec_in_binary=rec_in_binary)
+                                            rec_in_binary=rec_in_binary,
+                                            raw_format = 'kwd')
 
     def get_clusters(self):
         spk_data = mdaio.readmda(self.file_names['firings'])
@@ -317,9 +353,10 @@ class KiloKwikWriter(KwikFileWriter):
     mda_params = dict()
     # init the KwikFile class
 
-    def __init__(self, file_names, chan_group=0, rec_in_binary=np.empty(0)):
+    def __init__(self, file_names, chan_group=0, rec_in_binary=np.empty(0), raw_format='kwd'):
         super(KiloKwikWriter, self).__init__(file_names, chan_group=chan_group,
-                                             rec_in_binary=rec_in_binary)
+                                             rec_in_binary=rec_in_binary,
+                                             raw_format=raw_format)
 
     def load_grp_file(self):
         # look for the first ['grp'] file that exists
@@ -373,7 +410,7 @@ class KiloKwikWriter(KwikFileWriter):
         # by default, everything is unsorted.
         # if there is a description 'grp' file, look the described and change their label
         sorted_grp = self.load_grp_file()
-
+        pc_ind = np.load(self.file_names['pc_ind'])
         with h5py.File(self.file_names['kwik'], 'r+') as kwf:
             chan_group = kwf['/channel_groups'].require_group(
                 '{}'.format(self.chan_group))
@@ -402,7 +439,8 @@ class KiloKwikWriter(KwikFileWriter):
                 #h5t.append_atrributes(this_cluster_group, metric['metrics'])
                 tags_list_utf8 = [h5t.h5_unicode_hack(clu_type)]
                 h5t.append_atrributes(this_cluster_group,
-                                      {'tags': tags_list_utf8})
+                                      {'tags': tags_list_utf8,
+                                       'main_chan': pc_ind[clu_id]})
 
 
 def make_shank_kwd(raw_file, out_file_path, chan_list):
@@ -464,7 +502,8 @@ def kilo_to_kwik(kwd_path: str, kwik_path: str, kilo_folder: str,
                  realign_to_recordings: bool = True,
                  rec_in_binary: np.ndarray = np.empty(0),
                  chan_group=0,
-                 kilo_file_names=None):
+                 kilo_file_names=None,
+                 raw_format='kwd'):
 
     module_logger.info('Creating kwik file {} from kilosort folder {}'.format(
         kwik_path, kilo_folder))
@@ -474,13 +513,15 @@ def kilo_to_kwik(kwd_path: str, kwik_path: str, kilo_folder: str,
         # see explanations of kilo output files in
         # https://github.com/kwikteam/phy-contrib/blob/master/docs/template-gui.md
         kilo_file_names = dict(
-
             clu='spike_clusters.npy',
             spk='spike_times.npy',
             grp='cluster_group.tsv', # manually curated cluster tags
             grp_kilo='cluster_KSLabel.tsv', # default kilo cluster tags
-            par='params.py',
-            temp='spike_templates.npy')
+            phy_par='params.py',
+            temp='spike_templates.npy',
+            params='params.json',
+            pc_ind='pc_feature_ind.npy'
+            )
 
     file_paths = {k: os.path.join(kilo_folder, v)
                   for k, v in kilo_file_names.items()}
@@ -500,7 +541,8 @@ def kilo_to_kwik(kwd_path: str, kwik_path: str, kilo_folder: str,
         file_paths['temp'] = None
         module_logger.debug(file_paths)
 
-    k = KiloKwikWriter(file_paths, rec_in_binary=rec_in_binary, chan_group=chan_group)
+    k = KiloKwikWriter(file_paths, rec_in_binary=rec_in_binary, chan_group=chan_group, 
+                       raw_format=raw_format)
     k.get_clusters()
     module_logger.info('Making spike tables')
     k.make_spk_tables(realign_to_recordings=True)

@@ -188,6 +188,9 @@ def sparse_raster(x, nan=False):
     raster[:] = np.nan
 
     for trial in np.arange(n_t):
+        # print(trial)
+        # if(trial==15):
+        #     print(np.nanmax(x[trial, :]))
         r = x[trial, :]-1
         raster[trial, np.array(r[~np.isnan(r)], dtype=np.int)] = 1
 
@@ -212,12 +215,13 @@ def plottable_array(x:np.ndarray, scale:np.ndarray, offset:np.ndarray) -> np.nda
     # - add offset_i
     n_row, n_col = x.shape
     for col in range(n_col):
+        col_mean = np.mean(x[:, col])
         for row in range(n_row):
-            x[row, col] = x[row, col] * scale[col] + offset[col]
+            x[row, col] = (x[row, col] - col_mean)* scale[col] + offset[col]
     return x
 
 
-def plot_array(x: np.ndarray, scale='each', ax=None) -> axes.Axes:
+def plot_array(x: np.ndarray, scale='each', ax=None, offset_scale=1) -> axes.Axes:
 
     """ Rescale and offset an array for quick plotting multiple channels, along the 
         1 axis, for each jth axis
@@ -237,7 +241,7 @@ def plot_array(x: np.ndarray, scale='each', ax=None) -> axes.Axes:
     
     # arrange the array:
     n_row, n_col = x.shape
-    offset = - np.arange(n_col)
+    offset = np.arange(n_col) * offset_scale
     ptp = np.ptp(x, axis=0)
     if scale is 'max':
         ptp[:] = np.max(ptp)

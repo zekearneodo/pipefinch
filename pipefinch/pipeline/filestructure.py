@@ -87,7 +87,10 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
     exp_struct['folders'] = {}
     exp_struct['files'] = {}
 
-   # The raw files
+    # The bird structure
+    exp_struct['folders']['bird'] = os.path.join(location['mnt'], bird)
+    
+    # The raw files
     exp_struct['folders']['raw'] = os.path.join(
         location['mnt'], bird, ephys_folder, 'raw', sess)
     for f, n in zip(['par', 'set', 'rig'],
@@ -97,7 +100,7 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
     # the kwik system (spikes, events, kwd file with streams)
     exp_struct['folders']['kwik'] = os.path.join(
         location['local'], bird, ephys_folder, 'kwik', sess)
-    for f, n in zip(['kwd', 'kwik', 'kwe'], ['streams.kwd', 'spikes.kwik', 'events.kwe']):
+    for f, n in zip(['kwd', 'kwik', 'kwe'], ['stream.kwd', 'spikes.kwik', 'events.kwe']):
         exp_struct['files'][f] = os.path.join(exp_struct['folders']['kwik'], n)
 
     if 'sort' in sess_par and sess_par['sort'] is not None:
@@ -181,3 +184,6 @@ def msort_cleanup(exp_struct: dict):
         os.remove(mda_raw_path)
     except FileNotFoundError:
         logger.debug('Nuttin done, file wasnt there')
+
+def list_subfolders(folder_path):
+    return next(os.walk(os.path.abspath(folder_path)))[1]
