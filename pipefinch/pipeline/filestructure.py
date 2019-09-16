@@ -21,10 +21,10 @@ locations_dict['lookfar'] = {'mnt': os.path.abspath('/Volumes/Samsung_X5/microdr
                              'fast': os.path.abspath('/Volumes/Samsung_X5/scratch')
                              }
 
-locations_dict['lookfar'] = {'mnt': os.path.abspath('/Users/zeke/experiment/birds'),
-                             'local': os.path.abspath('/Users/zeke/experiment/birds'),
-                             'fast': os.path.abspath('/Users/zeke/experiment/scratch')
-                             }
+# locations_dict['lookfar'] = {'mnt': os.path.abspath('/Users/zeke/experiment/birds'),
+#                              'local': os.path.abspath('/Users/zeke/experiment/birds'),
+#                              'fast': os.path.abspath('/Users/zeke/experiment/scratch')
+#                              }
 # Zinch in windows
 locations_dict['Zinch'] = {'mnt': '\\\\ZUPERFINCHJR\storage\Data',
                            'local': os.path.abspath('C:\experiment')}
