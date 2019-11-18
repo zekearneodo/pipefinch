@@ -10,8 +10,14 @@ from pipefinch.h5tools.core.h5tools import append_atrributes
 logger = logging.getLogger('pipefinch.h5tools.core.tables')
 
 
-def insert_table(group: h5py.Group, table: np.array, name: str, attr_dict: dict = None) -> h5py.Dataset:
-    dset = group.create_dataset(name, data=table)
+def insert_table(group: h5py.Group, table: np.array, name: str, 
+                 attr_dict: dict=None, 
+                 force_dtype=None) -> h5py.Dataset:
+    
+    dtype = table.dtype if force_dtype is None else force_dtype 
+    dset = group.create_dataset(name, table.shape, 
+                                dtype=dtype,
+                                data=table)
     if attr_dict is not None:
         append_atrributes(dset, attr_dict)
     return dset

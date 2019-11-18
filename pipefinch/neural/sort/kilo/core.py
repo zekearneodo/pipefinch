@@ -24,8 +24,17 @@ default_kilo_pars = {'kilo_version': 2,  # version of kilosort to use (1 or 2)
                      'offset': 0,
                      'hp_filtered': True,
                      'dtype_name': np.int16.__name__,
+                     ## Other parameters for the sorting (ops, named exactly as in config.m)
+                     'AUCsplit': 0.9,
+                     'minFR': 1/50,
+                     'spkTh': -6,
+                     'minfr_goodchannels': 0.01
                      }
 
+# what keys in the kilo_pars dictionary are actually replaceable in the templates
+template_subst_keys = ['s_f', 'n_chan', 'n_filt', 'auto_merge', 'use_gpu', 'AUCsplit', 
+                       'minFR', 'spkTh', 'minfr_goodchannels']
+        
 default_kilo_paths = {
     # paths for Kilosort2
     2: {'kilo_dir': os.path.abspath(
@@ -150,16 +159,12 @@ def make_kilo_scripts(local_sort_dir, user_kilo_pars: dict = {}, user_kilo_paths
     kilo_version = user_kilo_pars['kilo_version']
     version_kilo_paths = kilo_paths[kilo_version]
     # parameters are all for version 1/2; the templates take care of the rest
-    subst_par = {
+    subst_par = {k: kilo_pars[k] for k in template_subst_keys}
+    subst_par.update({
         'kilo_dir': version_kilo_paths['kilo_dir'],
         'npy_matdir': version_kilo_paths['npymat_dir'],
         'data_dir': local_sort_dir,
-        's_f': kilo_pars['s_f'],
-        'n_chan': kilo_pars['n_chan'],
-        'n_filt': kilo_pars['n_filt'],
-        'auto_merge': kilo_pars['auto_merge'],
-        'use_gpu': kilo_pars['use_gpu']
-    }
+    })
     logger.debug('Substituting template parameters with {}'.format(subst_par))
 
     # get the Templates from the template files

@@ -11,15 +11,20 @@ import logging
 import configparser
 import datetime
 import parse
+import shutil
+import copy
 import numpy as np
 import pandas as pd
 import warnings
 import h5py
 import contextlib
 
-from intan2kwik.core.h5 import tables
+#from intan2kwik.core.h5 import tables
+from pipefinch.h5tools.core import tables
+
 from pipefinch.h5tools.core.h5tools import h5_unicode_hack
 from pipefinch.pipeline import filestructure as et
+from pipefinch.util import fileutil as fu
 from intan2kwik import kwd
 
 logger = logging.getLogger('pipefinch.pipeline.sglxutil')
@@ -105,7 +110,8 @@ def get_imec_meta(meta_file_path: str) -> dict:
     full_meta = dict(config['r'])  # read the full meta
 
     usual_meta = {'nsavedchans': int(config['r']['nsavedchans']),
-                  's_f': float(config['r']['imsamprate'])
+                  's_f': float(config['r']['imsamprate']),
+                  'meta_file_path': meta_file_path
                   }
     full_meta.update(usual_meta)
     return full_meta
@@ -121,6 +127,7 @@ def get_nidq_meta(meta_file_path: str) -> dict:
                   's_f': float(config['r']['niSampRate']),
                   # n chans in multiplex neural, multiplex analog, direct analog, digital:
                   'sns_mn_ma_xa_dw': list(map(int, config['r']['snsMnMaXaDw'].split(','))),
+                  'meta_file_path': meta_file_path
                   }
     full_meta.update(usual_meta)
     return full_meta
@@ -320,6 +327,13 @@ def sgl_to_kwd_onerec(kwd_file, meta_file_path: str, rec: int, include_blocks: l
             dset_name = 'data'
             data_grp = create_nidq_grp(
                 rec_grp, nidq_dict, rec, include_channels=None, block=block)
+            
+            # create application_data for the metadata
+            sgl_epoch = os.path.normpath(meta_file_path).split(os.path.sep)[-2]
+            app_data_grp = data_grp.require_group('application_data')
+            logger.info('created app_data_grp, will add sglx_epoch {}'.format(h5_unicode_hack(sgl_epoch)))
+            app_data_grp.attrs.create('sglx_epoch', 
+                                      h5_unicode_hack(sgl_epoch))
         else:
             dset_name = block
 
@@ -341,6 +355,7 @@ def sgl_to_kwd_onerec(kwd_file, meta_file_path: str, rec: int, include_blocks: l
             all_chan_names_uni = [h5_unicode_hack(x) for x in all_chan_names]
             app_data_grp = data_grp.require_group('application_data')
             app_data_grp.attrs.create('dig_channel_names', all_chan_names_uni)
+            
 
             # make the 'events' detections (detect digital edges)
             # gets array t, chan_idx, edge
@@ -397,7 +412,7 @@ def sgl_to_kwd(meta_path, dest_file_path, rec=0, include_blocks=['adc', 'dig_in'
 
 
 def all_sgl_to_kwd(sess_par: dict, include_blocks=['adc', 'dig_in'], overwrite=False):
-        # points to all the raw data in a folder and get the blocks to kwd
+    # points to all the raw data in a folder and get the blocks to kwd
     all_sess_folders = list_sgl_epochs(sess_par, raw_paths=True)
     exp_struct = et.get_exp_struct(
         sess_par['bird'], sess_par['sess'], sess_par['sort'])
@@ -422,8 +437,9 @@ def all_sgl_to_kwd(sess_par: dict, include_blocks=['adc', 'dig_in'], overwrite=F
        
             nidq_dict = sgl_to_kwd(nidq_meta_file, dest_file_path,
                                rec=0, include_blocks=include_blocks, overwrite=True)
-        except:
-            logger.info("Unexpected error:", sys.exc_info()[0])
+        except BaseException as e:
+            logger.warning('Error in sess {}'.format(sess_folder))
+            warnings.warn('Error in sess {}: {}'.format(sess_folder, str(e)))
             trouble_sessions.append(sess_folder)
 
     logger.info('Done with all')
@@ -440,15 +456,144 @@ def list_sgl_epochs(sess_par: dict, raw_paths=False) -> list:
 
     all_sess_folders = list(
         filter(os.path.isdir, glob.glob(os.path.join(raw_folder, '*'))))
+    all_sess_folders.sort()
     if raw_paths:
         return all_sess_folders
     else:
         return list(map(lambda x: os.path.split(x)[-1], all_sess_folders))
 
+### tools to merge epochs
 
-def concat_epochs(sess_par: dict, epoch_names: list) -> str:
-    # merges two epocs into a single binary file
-    pass
+def merge_epochs(sess_par: dict, epochs_to_merge: list, overwrite: bool=True) -> tuple:
+    logger.info('Will merge epochs {}'.format(epochs_to_merge))
+    new_epoch = '{}_{}'.format(sess_par['sess'], 'alles')
+    epoch_structs = [sgl_struct(sess_par, epoch) for epoch in epochs_to_merge]
+    epoch_folders = [sgl_file_struct(epoch_struct['folders']['raw'])[0] for epoch_struct in epoch_structs]
+    exp_struct = sgl_struct(sess_par, new_epoch)
+    sgl_folder, _ = sgl_file_struct(exp_struct['folders']['raw'])
+    logger.info('SGL folder struct {}'.format(sgl_folder))
+    
+    # make de folders
+    merged_raw_folder = exp_struct['folders']['raw']
+    logger.info('Creating merged raw {}'.format(merged_raw_folder))
+    if overwrite:
+        logger.info('Will cleanup destination folder first: {}'.format(merged_raw_folder))
+        if os.path.exists(merged_raw_folder):
+            shutil.rmtree(merged_raw_folder)
+    os.makedirs(merged_raw_folder, exist_ok=True)
+    
+    # copy set files from the first session
+    # Note that it is empty
+    copy_raw = []
+    for k, v in exp_struct['files'].items():
+        if k in copy_raw:
+            #print(v)
+            shutil.copyfile(epoch_structs[0]['files'][k], v)
+            
+    # copy the raw_metadatas
+    epoch_meta_list = []
+    for epoch_folder in epoch_folders:
+        epoch_meta = copy.deepcopy(epoch_folder)
+        logger.info('* Adding epoch {}'.format(epoch_folder['nidq']))
+        for k, v in epoch_folder.items():
+            if isinstance(v, dict):
+                # deal with the probes
+                for prb, epoch_fold in v.items():
+                    src_fold = epoch_fold
+                    probe_folder = '{}_imec{}'.format(new_epoch, prb)
+                    dst_path = os.path.join(merged_raw_folder, probe_folder)
+                    src_meta_paths = merge_raw_sgl(src_fold, dst_path) # yields lf, ap meta
+                    
+                    logger.info('imec meta paths {}'.format(src_meta_paths))
+                    for band in ['ap', 'lf']:
+                        meta_path = [x for x in src_meta_paths if band in x][0]
+                        full_meta = get_imec_meta(meta_path)
+                        epoch_meta[k + '_meta_' + band] = {prb: full_meta}
+                #os.makedirs(dest_fold[0], exist_ok=True)
+            else: #it's the nidaq
+                src_fold = v
+                dst_path = merged_raw_folder
+                src_meta_paths = merge_raw_sgl(src_fold, dst_path) # now it's only one meta path, 
+                # merge_raw_sgl will throw error if there are more than one trigger
+                # get the meta
+                full_meta = get_nidq_meta(src_meta_paths[0])
+                # append it to the dict
+                epoch_meta[k + '_meta'] = full_meta
+        
+        epoch_meta_list.append(epoch_meta)
+                
+    return exp_struct, epoch_structs, epoch_meta_list, new_epoch
 
 
 
+def merge_raw_sgl(src_fold: str, dest_fold: str) -> list:
+    logger.info('merging {} into {}'.format(src_fold, dest_fold))
+    os.makedirs(dest_fold, exist_ok=True)
+    meta_files = glob.glob(os.path.join(src_fold, '*.meta'))
+    # check that there is only one triggered recording in the folder (only one tuple of bin, meta with t0 as identifier)
+    t_instances = np.unique([int(x.split('_')[-1].split('.')[0].strip('t')) for x in meta_files])
+    n_trigs = t_instances.size
+    if n_trigs != 1:
+        if n_trigs > 1:
+            raise NotImplementedError('Many triggers (t0, t1,...) in the epoch, dont know how to handle yet')
+        else:
+            raise RuntimeError('No recording t identifiers found (t0)')       
+    logger.info(meta_files)
+    
+    # copy each meta_file to the corresponding, only if there is none of the class (i.e, leave just the first meta file for each merged session)
+    new_base = os.path.split(dest_fold)[-1]
+    if new_base.find('imec') >=0:
+        new_base, _, prb = new_base.rpartition('_')
+    logger.info('new base {}'.format(new_base))
+    for m_path in meta_files: # for now it's only one
+        meta_file = os.path.split(m_path)[-1]
+        m_fname, m_ext = meta_file.split('.', 1)
+        m_base, _,  m_t = m_fname.rpartition('_')
+        new_meta_name = '{}_{}'.format(new_base, m_t)
+        new_meta_file = '{}.{}'.format(new_meta_name, m_ext)
+        logger.info('New meta is {}'.format(new_meta_file))
+        logger.info('dest_fold {}'.format(dest_fold))
+        # check if dest exists and copy
+        new_bin_path, new_meta_path = get_data_meta_path(os.path.join(dest_fold, new_meta_file))
+        fu.safe_copy(m_path, new_meta_path)
+        
+        # append binaries
+        bin_path, _ = get_data_meta_path(m_path)
+        fu.append_binary(bin_path, new_bin_path)
+    return meta_files
+
+def make_merged_kwd(merged_exp_struct: dict, epoch_meta_list: list, overwrite=False):
+## use these epoch folders to read the metas and make the kwd of the merged thing
+    ## get the metas for all the nidq in the sorted epoch folders
+    logger.info('merging nidq data of {} epochs onto kwd file {}'.format(len(epoch_meta_list), merged_exp_struct['files']['kwd']))
+    
+    ni_pd = pd.DataFrame([x['nidq_meta'] for x in epoch_meta_list])
+    ni_pd['filetimesecs'] = ni_pd['filetimesecs'].apply(np.float)
+    ni_pd['samples'] = ni_pd['filetimesecs'] * ni_pd['s_f']
+    
+    ni_pd.sort_values('filecreatetime')
+    logger.info('Epochs to merge {}'.format(ni_pd['meta_file_path']))
+    
+    # signal the breaking points within the concatenated
+    ni_pd['starts'] = ni_pd['samples'].shift(1)
+    ni_pd.loc[0, 'starts'] = 0
+   
+    ## make the kwd with sgl_to_kwd(meta_path, dest_file_path, rec=0, include_blocks=['adc', 'dig_in'], overwrite=False) -> dict
+    kwd_path = merged_exp_struct['files']['kwd']
+    
+    meta_folder = sgl_file_struct(merged_exp_struct['folders']['raw'])[0]['nidq']
+    nidq_meta_files = glob.glob(os.path.join(meta_folder, '*.meta'))
+    nidq_meta_path = nidq_meta_files[0]
+    logger.info('nidq meta path {}'.format(nidq_meta_path))
+    merged_nidq_dict = sgl_to_kwd(nidq_meta_path, kwd_path, overwrite=overwrite)
+    
+    ## edit the kwd and add the metadata on the breaks to /application_data tables
+    with h5py.File(kwd_path, 'r+') as kwd_file:
+        app_data_group = kwd_file['/recordings/0/application_data']
+        
+        tables.insert_table(app_data_group, ni_pd['starts'].to_numpy(dtype=np.int), 'breaks_sample')
+        tables.insert_table(app_data_group, ni_pd['filecreatetime'].to_numpy(), 'breaks_tstart', force_dtype=h5py.special_dtype(vlen=str))
+        tables.insert_table(app_data_group, ni_pd['meta_file_path'].to_numpy(), 'breaks_file', force_dtype=h5py.special_dtype(vlen=str))
+        tables.insert_table(app_data_group, ni_pd['samples'].to_numpy(dtype=np.int), 'breaks_file_samples')
+    
+    return merged_nidq_dict, ni_pd

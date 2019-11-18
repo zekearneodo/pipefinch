@@ -9,6 +9,7 @@ import tqdm
 import h5py
 import numpy as np
 import pandas as pd
+import warnings
 from numba import jit
 from scipy import signal as ss
 from scipy.io import wavfile
@@ -360,7 +361,7 @@ class KiloKwikWriter(KwikFileWriter):
 
     def load_grp_file(self):
         # look for the first ['grp'] file that exists
-        # fist check the 'grp' (user defined), otherwise try the 'grp_kilo'
+        # fist check the 'grp' (user defined), otherwise try the 'grp_kilo' (cluster_KSLabel)
         if os.path.exists(self.file_names['grp']):
             grp_file_path = self.file_names['grp']
         else:
@@ -406,11 +407,26 @@ class KiloKwikWriter(KwikFileWriter):
         clu_translate = {'noise': 'noise',
                          'good': 'accepted',
                          'mua': 'mua'}
-
         # by default, everything is unsorted.
         # if there is a description 'grp' file, look the described and change their label
         sorted_grp = self.load_grp_file()
-        pc_ind = np.load(self.file_names['pc_ind'])
+        # the pc_feature npy files only make sense if there were no clusters created/merged
+        # during manual sorting; 
+        # in which case the last clu in ind is the last clu in the cluster_group
+        auto_cul_grp = np.loadtxt(self.file_names['grp_kilo'],
+                              dtype={'names': ('cluster_id', 'group'),
+                                     'formats': ('i2', 'S8')},
+                              skiprows=1)
+        module_logger.debug('max clu {}'.format(np.max(self.clu)))
+        if np.max(self.clu) == np.max(auto_cul_grp['cluster_id']):
+            pc_ind = np.load(self.file_names['pc_ind'])
+        else:
+            warnings.warn('Clusters in spike_clusters.npy are not the same as  \
+                         in cluster_group.tsv. Features, templates and amplitues will be wrong\
+                             or absent')
+            pc_ind = np.ones_like(self.clu)
+            pc_ind[:] = np.nan
+ 
         with h5py.File(self.file_names['kwik'], 'r+') as kwf:
             chan_group = kwf['/channel_groups'].require_group(
                 '{}'.format(self.chan_group))
